@@ -124,26 +124,30 @@ The application uses Supabase (PostgreSQL) with the following main tables:
 ### Prerequisites
 - Node.js 18+
 - npm or yarn
-- Supabase account
 
-### Installation
+### Quick Start
 ```bash
+# Clone the repository
+git clone https://github.com/mehak6/stationery-business.git
+cd stationery-business
+
 # Install dependencies
 npm install
 
-# Set up environment variables
-cp .env.example .env.local
-# Add your Supabase URL and keys
-
+# Environment is already configured!
 # Run development server
 npm run dev
 ```
 
+**✅ Ready to use!** - Database is connected and environment is configured.
+
 ### Database Setup
-1. Create a Supabase project
-2. Run either:
-   - `supabase_sql_setup.sql` for full setup with authentication
-   - `inventory_setup.sql` for simplified single-user setup
+✅ **Your Supabase project is ready!**
+- **Project URL**: `https://ccpvnpidhxkcbxeeyqeq.supabase.co`
+- **Project ID**: `ccpvnpidhxkcbxeeyqeq` 
+- **Database**: Already connected and tested ✅
+
+See `SUPABASE_SETUP.md` for detailed setup instructions.
 
 ### Available Scripts
 - `npm run dev`: Development server

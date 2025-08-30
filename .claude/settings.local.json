@@ -9,7 +9,18 @@
       "Bash(git init:*)",
       "Bash(git add:*)",
       "Bash(gh repo create:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(winget install:*)",
+      "Bash(gh:*)",
+      "Bash(refreshenv)",
+      "Bash(\"C:\\Program Files\\GitHub CLI\\gh.exe\" --version)",
+      "Bash(\"C:\\Program Files\\GitHub CLI\\gh.exe\" auth status)",
+      "Bash(\"C:\\Program Files\\GitHub CLI\\gh.exe\" auth login --web)",
+      "Bash(\"C:\\Program Files\\GitHub CLI\\gh.exe\" repo create stationery-business --public --description \"A comprehensive inventory management system for stationery and games businesses built with Next.js and Supabase\" --source=.)",
+      "Bash(git branch:*)",
+      "Bash(git push:*)",
+      "Bash(npm install:*)",
+      "Bash(node:*)"
     ],
     "deny": [],
     "ask": []
