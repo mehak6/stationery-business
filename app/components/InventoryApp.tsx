@@ -21,92 +21,69 @@ import {
   getSales,
   getCategories,
   createProduct,
+  createSale,
+  updateProduct,
   getAnalytics,
   type Product,
   type Sale,
   type Category
 } from '../../supabase_client';
 
-// Mock data as fallback
-const mockProducts = [
-  {
-    id: '1',
-    name: 'Blue Pen',
-    category: { name: 'Stationery' },
-    barcode: 'ST001',
-    purchase_price: 5.00,
-    selling_price: 8.00,
-    stock_quantity: 45,
-    min_stock_level: 10,
-  },
-  {
-    id: '2',
-    name: 'Chess Set',
-    category: { name: 'Games' },
-    barcode: 'GM001',
-    purchase_price: 25.00,
-    selling_price: 40.00,
-    stock_quantity: 3,
-    min_stock_level: 5,
-  },
-  {
-    id: '3',
-    name: 'Notebook A4',
-    category: { name: 'Stationery' },
-    barcode: 'ST002',
-    purchase_price: 12.00,
-    selling_price: 18.00,
-    stock_quantity: 28,
-    min_stock_level: 15,
-  }
-];
-
-const mockSales = [
-  {
-    id: '1',
-    products: { name: 'Blue Pen' },
-    quantity: 5,
-    unit_price: 8.00,
-    total_amount: 40.00,
-    profit: 15.00,
-    sale_date: '2024-08-27',
-    customer_info: { name: 'John Doe' }
-  },
-  {
-    id: '2',
-    products: { name: 'Notebook A4' },
-    quantity: 2,
-    unit_price: 18.00,
-    total_amount: 36.00,
-    profit: 12.00,
-    sale_date: '2024-08-27',
-    customer_info: { name: 'Jane Smith' }
-  }
-];
-
-const mockCategories = [
-  { id: '1', name: 'Stationery' },
-  { id: '2', name: 'Games' },
-  { id: '3', name: 'Art Supplies' },
-  { id: '4', name: 'Electronics' },
-  { id: '5', name: 'Books' }
-];
+// No more mock data - using real Supabase data throughout the application
 
 // Dashboard Component
 function Dashboard({ onNavigate }) {
   const [analytics, setAnalytics] = useState({
-    totalProducts: 76,
-    totalSales: 2450,
-    totalProfit: 850,
-    todaySales: 156,
-    todayProfit: 45,
-    lowStockProducts: 3
+    totalProducts: 0,
+    totalSales: 0,
+    totalProfit: 0,
+    todaySales: 0,
+    todayProfit: 0,
+    lowStockProducts: 0
   });
 
-  const [recentSales, setRecentSales] = useState(mockSales);
-  const [lowStockItems, setLowStockItems] = useState(
-    mockProducts.filter(p => p.stock_quantity <= p.min_stock_level)
-  );
+  const [recentSales, setRecentSales] = useState([]);
+  const [lowStockItems, setLowStockItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch dashboard data on component mount
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        setLoading(true);
+        const [analyticsData, salesData, productsData] = await Promise.all([
+          getAnalytics(),
+          getSales(5), // Get recent 5 sales
+          getProducts()
+        ]);
+        
+        setAnalytics(analyticsData || {
+          totalProducts: 0,
+          totalSales: 0,
+          totalProfit: 0,
+          todaySales: 0,
+          todayProfit: 0,
+          lowStockProducts: 0
+        });
+        
+        setRecentSales(salesData || []);
+        
+        // Filter low stock items
+        const lowStock = (productsData || []).filter(p => p.stock_quantity <= p.min_stock_level);
+        setLowStockItems(lowStock);
+        
+      } catch (error) {
+        console.error('Error fetching dashboard data:', error);
+        // Set empty states on error
+        setRecentSales([]);
+        setLowStockItems([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, []);
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
@@ -175,7 +152,7 @@ function Dashboard({ onNavigate }) {
             {recentSales.map(sale => (
               <div key={sale.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
                 <div>
-                  <p className="font-medium text-gray-900">{sale.products.name}</p>
+                  <p className="font-medium text-gray-900">{sale.products?.name || 'Unknown Product'}</p>
                   <p className="text-sm text-gray-500">Qty: {sale.quantity} • ₹{sale.unit_price}</p>
                 </div>
                 <div className="text-right">
@@ -203,7 +180,7 @@ function Dashboard({ onNavigate }) {
               <div key={product.id} className="flex items-center justify-between p-4 bg-danger-50 rounded-lg border border-danger-200">
                 <div>
                   <p className="font-medium text-gray-900">{product.name}</p>
-                  <p className="text-sm text-gray-500">{product.category.name}</p>
+                  <p className="text-sm text-gray-500">{product.categories?.name || 'No Category'}</p>
                 </div>
                 <div className="text-right">
                   <p className="font-medium text-danger-600">{product.stock_quantity} left</p>
@@ -254,13 +231,13 @@ function ProductManagement({ onNavigate }) {
           getProducts(),
           getCategories()
         ]);
-        setProducts(productsData || mockProducts); // Fallback to mock data
-        setCategories(categoriesData || mockCategories);
+        setProducts(productsData || []);
+        setCategories(categoriesData || []);
       } catch (error) {
         console.error('Error fetching data:', error);
-        // Use mock data as fallback
-        setProducts(mockProducts);
-        setCategories(mockCategories);
+        // Set empty arrays on error
+        setProducts([]);
+        setCategories([]);
       } finally {
         setLoading(false);
       }
@@ -589,13 +566,33 @@ function QuickSale({ onNavigate }) {
     phone: ''
   });
   const [searchTerm, setSearchTerm] = useState('');
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const filteredProducts = mockProducts.filter(product =>
+  // Fetch products on component mount
+  useEffect(() => {
+    const fetchProducts = async () => {
+      try {
+        setLoading(true);
+        const productsData = await getProducts();
+        setProducts(productsData || []);
+      } catch (error) {
+        console.error('Error fetching products:', error);
+        setProducts([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchProducts();
+  }, []);
+
+  const filteredProducts = products.filter(product =>
     product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     product.barcode?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const handleSale = () => {
+  const handleSale = async () => {
     if (!selectedProduct) {
       alert('Please select a product');
       return;
@@ -606,24 +603,54 @@ function QuickSale({ onNavigate }) {
       return;
     }
 
-    const totalAmount = selectedProduct.selling_price * quantity;
-    const profit = (selectedProduct.selling_price - selectedProduct.purchase_price) * quantity;
+    try {
+      const totalAmount = selectedProduct.selling_price * quantity;
+      const profit = (selectedProduct.selling_price - selectedProduct.purchase_price) * quantity;
 
-    console.log('Processing sale:', {
-      product: selectedProduct,
-      quantity,
-      totalAmount,
-      profit,
-      customer: customerInfo
-    });
+      // Create sale record
+      const saleData = {
+        product_id: selectedProduct.id,
+        quantity: parseInt(quantity),
+        unit_price: parseFloat(selectedProduct.selling_price),
+        total_amount: totalAmount,
+        profit: profit,
+        customer_info: customerInfo.name || customerInfo.phone ? {
+          name: customerInfo.name || null,
+          phone: customerInfo.phone || null
+        } : null,
+        sale_date: new Date().toISOString().split('T')[0], // Today's date
+        notes: null
+      };
 
-    alert(`Sale completed! Total: ₹${totalAmount.toFixed(2)}`);
-    
-    // Reset form
-    setSelectedProduct(null);
-    setQuantity(1);
-    setCustomerInfo({ name: '', phone: '' });
-    setSearchTerm('');
+      await createSale(saleData);
+
+      // Update product stock
+      const newStockQuantity = selectedProduct.stock_quantity - quantity;
+      await updateProduct(selectedProduct.id, {
+        stock_quantity: newStockQuantity
+      });
+
+      // Update local product state
+      setProducts(prevProducts => 
+        prevProducts.map(p => 
+          p.id === selectedProduct.id 
+            ? { ...p, stock_quantity: newStockQuantity }
+            : p
+        )
+      );
+
+      alert(`Sale completed! Total: ₹${totalAmount.toFixed(2)}`);
+      
+      // Reset form
+      setSelectedProduct(null);
+      setQuantity(1);
+      setCustomerInfo({ name: '', phone: '' });
+      setSearchTerm('');
+
+    } catch (error) {
+      console.error('Error processing sale:', error);
+      alert('Error processing sale: ' + error.message);
+    }
   };
 
   return (
@@ -666,7 +693,7 @@ function QuickSale({ onNavigate }) {
                 <div className="flex items-center justify-between">
                   <div>
                     <h4 className="font-medium text-gray-900">{product.name}</h4>
-                    <p className="text-sm text-gray-500">{product.category.name} • {product.barcode}</p>
+                    <p className="text-sm text-gray-500">{product.categories?.name || 'No Category'} • {product.barcode}</p>
                     <p className="text-sm font-medium text-secondary-600">₹{product.selling_price}</p>
                   </div>
                   <div className="text-right">
