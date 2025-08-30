@@ -10,13 +10,19 @@ export const metadata: Metadata = {
   description: 'Simple inventory management system for stationery and games business',
   keywords: ['inventory', 'stationery', 'games', 'management'],
   authors: [{ name: 'Inventory Management System' }],
-  viewport: 'width=device-width, initial-scale=1',
-  themeColor: '#3b82f6',
   manifest: '/manifest.json',
   icons: {
     icon: '/favicon.ico',
     apple: '/apple-touch-icon.png',
   },
+}
+
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  themeColor: '#3b82f6',
 }
 
 export default function RootLayout({
