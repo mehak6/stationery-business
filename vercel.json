@@ -1,0 +1,19 @@
+{
+  "name": "stationery-business",
+  "version": 2,
+  "builds": [
+    {
+      "src": "package.json",
+      "use": "@vercel/next"
+    }
+  ],
+  "functions": {
+    "app/**/*.js": {
+      "maxDuration": 10
+    }
+  },
+  "regions": ["fra1"],
+  "env": {
+    "NODE_ENV": "production"
+  }
+}
