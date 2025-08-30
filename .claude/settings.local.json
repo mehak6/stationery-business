@@ -20,7 +20,8 @@
       "Bash(git branch:*)",
       "Bash(git push:*)",
       "Bash(npm install:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(grep:*)"
     ],
     "deny": [],
     "ask": []

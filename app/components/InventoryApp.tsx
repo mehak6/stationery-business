@@ -25,7 +25,7 @@ import {
   type Product,
   type Sale,
   type Category
-} from '../../lib/supabase';
+} from '../../supabase_client';
 
 // Mock data as fallback
 const mockProducts = [
@@ -238,15 +238,41 @@ function Dashboard({ onNavigate }) {
 
 // Product Management Component
 function ProductManagement({ onNavigate }) {
-  const [products, setProducts] = useState(mockProducts);
+  const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
 
+  // Fetch products and categories on component mount
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        const [productsData, categoriesData] = await Promise.all([
+          getProducts(),
+          getCategories()
+        ]);
+        setProducts(productsData || mockProducts); // Fallback to mock data
+        setCategories(categoriesData || mockCategories);
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        // Use mock data as fallback
+        setProducts(mockProducts);
+        setCategories(mockCategories);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
   const filteredProducts = products.filter(product => {
     const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          product.barcode?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = !selectedCategory || product.category.name === selectedCategory;
+    const matchesCategory = !selectedCategory || (product.categories?.name === selectedCategory);
     return matchesSearch && matchesCategory;
   });
 
@@ -295,7 +321,7 @@ function ProductManagement({ onNavigate }) {
               className="input-field"
             >
               <option value="">All Categories</option>
-              {mockCategories.map(category => (
+              {categories.map(category => (
                 <option key={category.id} value={category.name}>{category.name}</option>
               ))}
             </select>
@@ -304,11 +330,17 @@ function ProductManagement({ onNavigate }) {
       </div>
 
       {/* Products Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredProducts.map(product => (
+      {loading ? (
+        <div className="flex justify-center items-center py-12">
+          <div className="loading-spinner"></div>
+          <span className="ml-3 text-gray-600">Loading products...</span>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredProducts.map(product => (
           <div key={product.id} className="card hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between mb-4">
-              <span className="badge-info">{product.category.name}</span>
+              <span className="badge-info">{product.categories?.name || 'No Category'}</span>
               <div className="flex gap-2">
                 <button className="p-1 text-gray-400 hover:text-primary-600">
                   <Edit className="h-4 w-4" />
@@ -354,16 +386,26 @@ function ProductManagement({ onNavigate }) {
             )}
           </div>
         ))}
-      </div>
+        </div>
+      )}
 
       {/* Add Product Modal */}
-      {showAddForm && <AddProductModal onClose={() => setShowAddForm(false)} />}
+      {showAddForm && (
+        <AddProductModal 
+          categories={categories}
+          onClose={() => setShowAddForm(false)}
+          onProductAdded={(newProduct) => {
+            setProducts([newProduct, ...products]);
+            setShowAddForm(false);
+          }}
+        />
+      )}
     </div>
   );
 }
 
-// Add Product Modal Component
-function AddProductModal({ onClose }) {
+// Add Product Modal Component  
+function AddProductModal({ categories, onClose, onProductAdded }) {
   const [formData, setFormData] = useState({
     name: '',
     category_id: '',
@@ -375,12 +417,38 @@ function AddProductModal({ onClose }) {
     description: ''
   });
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    console.log('Adding product:', formData);
-    // Here you would call your Supabase createProduct function
-    alert('Product added successfully!');
-    onClose();
+    try {
+      // Convert form data to proper types
+      const productData = {
+        name: formData.name,
+        category_id: formData.category_id || null,
+        barcode: formData.barcode || null,
+        purchase_price: parseFloat(formData.purchase_price),
+        selling_price: parseFloat(formData.selling_price),
+        stock_quantity: parseInt(formData.stock_quantity),
+        min_stock_level: parseInt(formData.min_stock_level) || 5,
+        description: formData.description || null
+      };
+
+      // Create product in Supabase
+      const newProduct = await createProduct(productData);
+      
+      // Add the category information for display
+      const category = categories.find(cat => cat.id === productData.category_id);
+      const productWithCategory = {
+        ...newProduct,
+        categories: category
+      };
+
+      onProductAdded(productWithCategory);
+      alert('Product added successfully!');
+      
+    } catch (error) {
+      console.error('Error adding product:', error);
+      alert('Error adding product: ' + error.message);
+    }
   };
 
   return (
@@ -416,7 +484,7 @@ function AddProductModal({ onClose }) {
                 className="input-field"
               >
                 <option value="">Select category</option>
-                {mockCategories.map(category => (
+                {categories.map(category => (
                   <option key={category.id} value={category.id}>{category.name}</option>
                 ))}
               </select>
