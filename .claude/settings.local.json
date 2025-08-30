@@ -21,7 +21,9 @@
       "Bash(git push:*)",
       "Bash(npm install:*)",
       "Bash(node:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(curl:*)",
+      "Bash(/dev/null)"
     ],
     "deny": [],
     "ask": []

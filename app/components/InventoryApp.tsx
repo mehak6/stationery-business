@@ -716,7 +716,7 @@ function QuickSale({ onNavigate }) {
               {/* Selected Product */}
               <div className="p-4 bg-primary-50 border border-primary-200 rounded-lg">
                 <h4 className="font-medium text-gray-900">{selectedProduct.name}</h4>
-                <p className="text-sm text-gray-500">{selectedProduct.category.name}</p>
+                <p className="text-sm text-gray-500">{selectedProduct.categories?.name || 'No Category'}</p>
                 <p className="text-lg font-semibold text-primary-600">₹{selectedProduct.selling_price}</p>
               </div>
 
