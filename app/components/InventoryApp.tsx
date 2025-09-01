@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   ShoppingCart,
   Package,
@@ -1038,6 +1038,8 @@ function PartyManagement({ onNavigate }) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [selectedPurchase, setSelectedPurchase] = useState(null);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const fileInputRef = useRef(null);
 
   // Fetch party purchases on component mount
   useEffect(() => {
@@ -1095,9 +1097,8 @@ function PartyManagement({ onNavigate }) {
             Add Purchase
           </button>
           <button 
+            onClick={() => setShowUploadModal(true)}
             className="btn-outline"
-            title="Upload Excel/PDF (Coming Soon)"
-            disabled
           >
             <Upload className="h-5 w-5 mr-2" />
             Upload File
@@ -1222,6 +1223,17 @@ function PartyManagement({ onNavigate }) {
             ));
             setShowTransferModal(false);
             setSelectedPurchase(null);
+          }}
+        />
+      )}
+
+      {/* File Upload Modal */}
+      {showUploadModal && (
+        <FileUploadModal 
+          onClose={() => setShowUploadModal(false)}
+          onFileProcessed={(newPurchases) => {
+            setPartyPurchases([...newPurchases, ...partyPurchases]);
+            setShowUploadModal(false);
           }}
         />
       )}
@@ -1490,6 +1502,191 @@ function TransferModal({ purchase, onClose, onTransferComplete }) {
                 Transfer
               </button>
             </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// File Upload Modal Component
+function FileUploadModal({ onClose, onFileProcessed }) {
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const handleFileUpload = async (file) => {
+    if (!file) return;
+
+    // Check file type
+    const fileExtension = file.name.split('.').pop().toLowerCase();
+    if (!['xlsx', 'xls', 'csv'].includes(fileExtension)) {
+      alert('Please upload an Excel (.xlsx, .xls) or CSV (.csv) file');
+      return;
+    }
+
+    setUploading(true);
+    
+    try {
+      let parsedData = [];
+
+      if (fileExtension === 'csv') {
+        // Parse CSV file
+        const text = await file.text();
+        const Papa = await import('papaparse');
+        const result = Papa.parse(text, { header: true, skipEmptyLines: true });
+        parsedData = result.data;
+      } else {
+        // Parse Excel file
+        const XLSX = await import('xlsx');
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: 'buffer' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        parsedData = XLSX.utils.sheet_to_json(worksheet);
+      }
+
+      // Process parsed data
+      const processedPurchases = [];
+      const currentDate = new Date().toISOString().split('T')[0];
+
+      parsedData.forEach((row, index) => {
+        try {
+          // Map common column names (flexible mapping)
+          const purchase = {
+            party_name: row['Party Name'] || row['party_name'] || row['Supplier'] || row['supplier'] || 'Unknown Party',
+            item_name: row['Item Name'] || row['item_name'] || row['Product'] || row['product'] || row['Product Name'] || `Item ${index + 1}`,
+            barcode: row['Barcode'] || row['barcode'] || row['Code'] || row['code'] || '',
+            purchase_price: parseFloat(row['Purchase Price'] || row['purchase_price'] || row['Cost Price'] || row['cost_price'] || 0),
+            selling_price: parseFloat(row['Selling Price'] || row['selling_price'] || row['Sale Price'] || row['sale_price'] || 0),
+            purchased_quantity: parseInt(row['Quantity'] || row['quantity'] || row['Purchased Quantity'] || row['purchased_quantity'] || 1),
+            remaining_quantity: parseInt(row['Quantity'] || row['quantity'] || row['Purchased Quantity'] || row['purchased_quantity'] || 1),
+            purchase_date: row['Purchase Date'] || row['purchase_date'] || row['Date'] || row['date'] || currentDate,
+            notes: row['Notes'] || row['notes'] || row['Description'] || row['description'] || ''
+          };
+
+          // Validate required fields
+          if (purchase.item_name && purchase.purchase_price > 0 && purchase.selling_price > 0 && purchase.purchased_quantity > 0) {
+            processedPurchases.push(purchase);
+          }
+        } catch (error) {
+          console.warn(`Skipping row ${index + 1} due to error:`, error);
+        }
+      });
+
+      if (processedPurchases.length === 0) {
+        alert('No valid data found in the file. Please check the format and try again.');
+        return;
+      }
+
+      // Save to database
+      const savedPurchases = [];
+      for (const purchase of processedPurchases) {
+        try {
+          const savedPurchase = await createPartyPurchase(purchase);
+          savedPurchases.push(savedPurchase);
+        } catch (error) {
+          console.error('Error saving purchase:', error);
+        }
+      }
+
+      onFileProcessed(savedPurchases);
+      alert(`Successfully imported ${savedPurchases.length} purchases from file!`);
+
+    } catch (error) {
+      console.error('Error processing file:', error);
+      alert('Error processing file. Please check the format and try again.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) {
+      handleFileUpload(files[0]);
+    }
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setDragOver(true);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl max-w-lg w-full">
+        <div className="p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-bold text-gray-900">Upload Purchase File</h2>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+              <X className="h-6 w-6" />
+            </button>
+          </div>
+
+          {/* File Upload Area */}
+          <div
+            className={`border-2 border-dashed rounded-lg p-8 text-center ${
+              dragOver ? 'border-primary-500 bg-primary-50' : 'border-gray-300'
+            } ${uploading ? 'opacity-50 pointer-events-none' : ''}`}
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              onChange={(e) => handleFileUpload(e.target.files[0])}
+              className="hidden"
+            />
+            
+            <Upload className={`h-12 w-12 mx-auto mb-4 ${dragOver ? 'text-primary-500' : 'text-gray-400'}`} />
+            
+            {uploading ? (
+              <div>
+                <p className="text-lg font-medium text-gray-900 mb-2">Processing file...</p>
+                <p className="text-sm text-gray-500">Please wait while we import your purchases</p>
+              </div>
+            ) : (
+              <div>
+                <p className="text-lg font-medium text-gray-900 mb-2">Drop your file here or click to browse</p>
+                <p className="text-sm text-gray-500 mb-4">Supports Excel (.xlsx, .xls) and CSV (.csv) files</p>
+                <button className="btn-primary">
+                  Choose File
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Expected Format Info */}
+          <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+            <h3 className="font-medium text-gray-900 mb-2">Expected File Format:</h3>
+            <p className="text-sm text-gray-600 mb-2">Your file should contain columns with these names (flexible):</p>
+            <ul className="text-sm text-gray-600 space-y-1">
+              <li>• <strong>Party Name/Supplier:</strong> Supplier name</li>
+              <li>• <strong>Item Name/Product:</strong> Product name</li>
+              <li>• <strong>Purchase Price/Cost Price:</strong> Purchase cost</li>
+              <li>• <strong>Selling Price/Sale Price:</strong> Selling price</li>
+              <li>• <strong>Quantity:</strong> Purchased quantity</li>
+              <li>• <strong>Barcode/Code:</strong> Product code (optional)</li>
+              <li>• <strong>Purchase Date/Date:</strong> Purchase date (optional)</li>
+              <li>• <strong>Notes/Description:</strong> Additional notes (optional)</li>
+            </ul>
+          </div>
+
+          <div className="flex gap-3 mt-6">
+            <button onClick={onClose} className="btn-outline flex-1">
+              Cancel
+            </button>
           </div>
         </div>
       </div>
