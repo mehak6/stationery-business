@@ -21,6 +21,8 @@
     "lucide-react": "^0.290.0",
     "next": "14.0.0",
     "papaparse": "^5.5.3",
+    "pdf-parse": "^1.1.1",
+    "pdfjs-dist": "^5.4.149",
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "react-hot-toast": "^2.4.1",

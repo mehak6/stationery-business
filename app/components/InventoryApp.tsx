@@ -1509,6 +1509,137 @@ function TransferModal({ purchase, onClose, onTransferComplete }) {
   );
 }
 
+// PDF Text Parsing Function
+function parsePDFText(text) {
+  const lines = text.split('\n').filter(line => line.trim().length > 0);
+  const parsedData = [];
+  
+  // Try to identify table-like structures or key-value pairs
+  let currentRecord = {};
+  let isInTable = false;
+  let headers = [];
+  
+  // Common patterns to look for
+  const patterns = {
+    party: /(?:party|supplier|vendor|from)[\s:]+([^\n\r]+)/i,
+    item: /(?:item|product|description|name)[\s:]+([^\n\r]+)/i,
+    purchasePrice: /(?:purchase|cost|buy)[\s\$₹]*price[\s:]*[\$₹]*([0-9,\.]+)/i,
+    sellingPrice: /(?:sell|sale|retail)[\s\$₹]*price[\s:]*[\$₹]*([0-9,\.]+)/i,
+    quantity: /(?:quantity|qty|amount|units?)[\s:]*([0-9,\.]+)/i,
+    barcode: /(?:barcode|code|sku|id)[\s:]+([A-Za-z0-9\-_]+)/i,
+    date: /(?:date|purchased|bought)[\s:]*([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4})/i,
+    notes: /(?:notes?|remarks?|description)[\s:]+([^\n\r]+)/i
+  };
+  
+  // Try to extract structured data from text
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    
+    // Skip empty lines and headers
+    if (!line || line.match(/^(page|total|subtotal|invoice|receipt)/i)) continue;
+    
+    // Check for table headers
+    if (line.match(/party|supplier|item|product|price|quantity|qty/i) && 
+        line.split(/\s{2,}|\t/).length > 2) {
+      headers = line.split(/\s{2,}|\t/).map(h => h.trim().toLowerCase());
+      isInTable = true;
+      continue;
+    }
+    
+    // If we're in a table and have headers, try to parse as table row
+    if (isInTable && headers.length > 0) {
+      const values = line.split(/\s{2,}|\t/).map(v => v.trim());
+      if (values.length >= headers.length - 1) {
+        const record = {};
+        headers.forEach((header, index) => {
+          if (values[index]) {
+            if (header.includes('party') || header.includes('supplier')) record.party_name = values[index];
+            else if (header.includes('item') || header.includes('product')) record.item_name = values[index];
+            else if (header.includes('purchase') || header.includes('cost')) record.purchase_price = parseFloat(values[index].replace(/[^\d.]/g, '')) || 0;
+            else if (header.includes('sell') || header.includes('sale')) record.selling_price = parseFloat(values[index].replace(/[^\d.]/g, '')) || 0;
+            else if (header.includes('qty') || header.includes('quantity')) record.quantity = parseInt(values[index]) || 0;
+            else if (header.includes('code') || header.includes('barcode')) record.barcode = values[index];
+            else if (header.includes('date')) record.date = values[index];
+          }
+        });
+        
+        if (record.item_name && (record.purchase_price > 0 || record.selling_price > 0)) {
+          parsedData.push(record);
+        }
+        continue;
+      } else {
+        isInTable = false; // End of table
+      }
+    }
+    
+    // Try pattern matching for key-value pairs
+    let foundMatch = false;
+    for (const [key, pattern] of Object.entries(patterns)) {
+      const match = line.match(pattern);
+      if (match) {
+        foundMatch = true;
+        switch (key) {
+          case 'party':
+            currentRecord.party_name = match[1].trim();
+            break;
+          case 'item':
+            currentRecord.item_name = match[1].trim();
+            break;
+          case 'purchasePrice':
+            currentRecord.purchase_price = parseFloat(match[1].replace(/,/g, '')) || 0;
+            break;
+          case 'sellingPrice':
+            currentRecord.selling_price = parseFloat(match[1].replace(/,/g, '')) || 0;
+            break;
+          case 'quantity':
+            currentRecord.quantity = parseInt(match[1]) || 0;
+            break;
+          case 'barcode':
+            currentRecord.barcode = match[1].trim();
+            break;
+          case 'date':
+            currentRecord.date = match[1].trim();
+            break;
+          case 'notes':
+            currentRecord.notes = match[1].trim();
+            break;
+        }
+      }
+    }
+    
+    // If we found a complete record (has item and at least one price), save it
+    if (currentRecord.item_name && (currentRecord.purchase_price > 0 || currentRecord.selling_price > 0)) {
+      // If we just completed a record, save it and start a new one
+      if (foundMatch && Object.keys(currentRecord).length >= 3) {
+        parsedData.push({ ...currentRecord });
+        currentRecord = {};
+      }
+    }
+  }
+  
+  // Add the last record if it's valid
+  if (currentRecord.item_name && (currentRecord.purchase_price > 0 || currentRecord.selling_price > 0)) {
+    parsedData.push(currentRecord);
+  }
+  
+  // If no structured data found, try to create a generic record from any price information
+  if (parsedData.length === 0) {
+    const priceMatches = text.match(/[\$₹]?[0-9,]+\.?[0-9]*/g);
+    if (priceMatches && priceMatches.length >= 2) {
+      parsedData.push({
+        party_name: 'PDF Import',
+        item_name: 'Extracted Item',
+        purchase_price: parseFloat(priceMatches[0].replace(/[^\d.]/g, '')) || 0,
+        selling_price: parseFloat(priceMatches[1].replace(/[^\d.]/g, '')) || 0,
+        quantity: 1,
+        notes: 'Extracted from PDF - please verify details'
+      });
+    }
+  }
+  
+  return parsedData;
+}
+
 // File Upload Modal Component
 function FileUploadModal({ onClose, onFileProcessed }) {
   const [uploading, setUploading] = useState(false);
@@ -1520,8 +1651,8 @@ function FileUploadModal({ onClose, onFileProcessed }) {
 
     // Check file type
     const fileExtension = file.name.split('.').pop().toLowerCase();
-    if (!['xlsx', 'xls', 'csv'].includes(fileExtension)) {
-      alert('Please upload an Excel (.xlsx, .xls) or CSV (.csv) file');
+    if (!['xlsx', 'xls', 'csv', 'pdf'].includes(fileExtension)) {
+      alert('Please upload an Excel (.xlsx, .xls), CSV (.csv), or PDF (.pdf) file');
       return;
     }
 
@@ -1536,6 +1667,33 @@ function FileUploadModal({ onClose, onFileProcessed }) {
         const Papa = await import('papaparse');
         const result = Papa.parse(text, { header: true, skipEmptyLines: true });
         parsedData = result.data;
+      } else if (fileExtension === 'pdf') {
+        // Parse PDF file
+        try {
+          const buffer = await file.arrayBuffer();
+          const pdf = await import('pdfjs-dist/legacy/build/pdf.js');
+          
+          // Set worker source
+          pdf.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
+          
+          const pdfDocument = await pdf.getDocument({ data: buffer }).promise;
+          let fullText = '';
+          
+          // Extract text from all pages
+          for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
+            const page = await pdfDocument.getPage(pageNum);
+            const textContent = await page.getTextContent();
+            const pageText = textContent.items.map(item => item.str).join(' ');
+            fullText += pageText + '\n';
+          }
+          
+          // Parse the extracted text into structured data
+          parsedData = parsePDFText(fullText);
+        } catch (error) {
+          console.error('PDF parsing error:', error);
+          alert('Error reading PDF file. Please ensure it contains readable text.');
+          return;
+        }
       } else {
         // Parse Excel file
         const XLSX = await import('xlsx');
@@ -1552,21 +1710,38 @@ function FileUploadModal({ onClose, onFileProcessed }) {
 
       parsedData.forEach((row, index) => {
         try {
-          // Map common column names (flexible mapping)
-          const purchase = {
-            party_name: row['Party Name'] || row['party_name'] || row['Supplier'] || row['supplier'] || 'Unknown Party',
-            item_name: row['Item Name'] || row['item_name'] || row['Product'] || row['product'] || row['Product Name'] || `Item ${index + 1}`,
-            barcode: row['Barcode'] || row['barcode'] || row['Code'] || row['code'] || '',
-            purchase_price: parseFloat(row['Purchase Price'] || row['purchase_price'] || row['Cost Price'] || row['cost_price'] || 0),
-            selling_price: parseFloat(row['Selling Price'] || row['selling_price'] || row['Sale Price'] || row['sale_price'] || 0),
-            purchased_quantity: parseInt(row['Quantity'] || row['quantity'] || row['Purchased Quantity'] || row['purchased_quantity'] || 1),
-            remaining_quantity: parseInt(row['Quantity'] || row['quantity'] || row['Purchased Quantity'] || row['purchased_quantity'] || 1),
-            purchase_date: row['Purchase Date'] || row['purchase_date'] || row['Date'] || row['date'] || currentDate,
-            notes: row['Notes'] || row['notes'] || row['Description'] || row['description'] || ''
-          };
+          let purchase;
+          
+          if (fileExtension === 'pdf') {
+            // For PDF data, the structure is already parsed
+            purchase = {
+              party_name: row.party_name || 'PDF Import',
+              item_name: row.item_name || `Item ${index + 1}`,
+              barcode: row.barcode || '',
+              purchase_price: row.purchase_price || 0,
+              selling_price: row.selling_price || 0,
+              purchased_quantity: row.quantity || 1,
+              remaining_quantity: row.quantity || 1,
+              purchase_date: row.date || currentDate,
+              notes: row.notes || 'Imported from PDF'
+            };
+          } else {
+            // Map common column names for Excel/CSV (flexible mapping)
+            purchase = {
+              party_name: row['Party Name'] || row['party_name'] || row['Supplier'] || row['supplier'] || 'Unknown Party',
+              item_name: row['Item Name'] || row['item_name'] || row['Product'] || row['product'] || row['Product Name'] || `Item ${index + 1}`,
+              barcode: row['Barcode'] || row['barcode'] || row['Code'] || row['code'] || '',
+              purchase_price: parseFloat(row['Purchase Price'] || row['purchase_price'] || row['Cost Price'] || row['cost_price'] || 0),
+              selling_price: parseFloat(row['Selling Price'] || row['selling_price'] || row['Sale Price'] || row['sale_price'] || 0),
+              purchased_quantity: parseInt(row['Quantity'] || row['quantity'] || row['Purchased Quantity'] || row['purchased_quantity'] || 1),
+              remaining_quantity: parseInt(row['Quantity'] || row['quantity'] || row['Purchased Quantity'] || row['purchased_quantity'] || 1),
+              purchase_date: row['Purchase Date'] || row['purchase_date'] || row['Date'] || row['date'] || currentDate,
+              notes: row['Notes'] || row['notes'] || row['Description'] || row['description'] || ''
+            };
+          }
 
           // Validate required fields
-          if (purchase.item_name && purchase.purchase_price > 0 && purchase.selling_price > 0 && purchase.purchased_quantity > 0) {
+          if (purchase.item_name && (purchase.purchase_price > 0 || purchase.selling_price > 0) && purchase.purchased_quantity > 0) {
             processedPurchases.push(purchase);
           }
         } catch (error) {
@@ -1644,7 +1819,7 @@ function FileUploadModal({ onClose, onFileProcessed }) {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".xlsx,.xls,.csv"
+              accept=".xlsx,.xls,.csv,.pdf"
               onChange={(e) => handleFileUpload(e.target.files[0])}
               className="hidden"
             />
@@ -1659,7 +1834,7 @@ function FileUploadModal({ onClose, onFileProcessed }) {
             ) : (
               <div>
                 <p className="text-lg font-medium text-gray-900 mb-2">Drop your file here or click to browse</p>
-                <p className="text-sm text-gray-500 mb-4">Supports Excel (.xlsx, .xls) and CSV (.csv) files</p>
+                <p className="text-sm text-gray-500 mb-4">Supports Excel (.xlsx, .xls), CSV (.csv), and PDF (.pdf) files</p>
                 <button className="btn-primary">
                   Choose File
                 </button>
@@ -1670,8 +1845,8 @@ function FileUploadModal({ onClose, onFileProcessed }) {
           {/* Expected Format Info */}
           <div className="mt-6 p-4 bg-gray-50 rounded-lg">
             <h3 className="font-medium text-gray-900 mb-2">Expected File Format:</h3>
-            <p className="text-sm text-gray-600 mb-2">Your file should contain columns with these names (flexible):</p>
-            <ul className="text-sm text-gray-600 space-y-1">
+            <p className="text-sm text-gray-600 mb-2">Your file should contain columns/data with these fields (flexible):</p>
+            <ul className="text-sm text-gray-600 space-y-1 mb-3">
               <li>• <strong>Party Name/Supplier:</strong> Supplier name</li>
               <li>• <strong>Item Name/Product:</strong> Product name</li>
               <li>• <strong>Purchase Price/Cost Price:</strong> Purchase cost</li>
@@ -1681,6 +1856,9 @@ function FileUploadModal({ onClose, onFileProcessed }) {
               <li>• <strong>Purchase Date/Date:</strong> Purchase date (optional)</li>
               <li>• <strong>Notes/Description:</strong> Additional notes (optional)</li>
             </ul>
+            <div className="text-xs text-gray-500 bg-blue-50 p-2 rounded">
+              <strong>PDF Support:</strong> For PDF files, the system will automatically extract text and try to identify product information using pattern recognition. Best results with structured documents like invoices or purchase orders.
+            </div>
           </div>
 
           <div className="flex gap-3 mt-6">
