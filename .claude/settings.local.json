@@ -23,7 +23,11 @@
       "Bash(node:*)",
       "Bash(grep:*)",
       "Bash(curl:*)",
-      "Bash(/dev/null)"
+      "Bash(/dev/null)",
+      "Bash(dir:*)",
+      "Bash(npm run lint)",
+      "Bash(vercel:*)",
+      "Bash(npm run build:*)"
     ],
     "deny": [],
     "ask": []

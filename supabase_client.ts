@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { Database } from './database.types'
+import { Database } from './lib/database.types'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -30,19 +30,31 @@ export type SaleInsert = Database['public']['Tables']['sales']['Insert']
 export type CategoryInsert = Database['public']['Tables']['categories']['Insert']
 export type CustomerInsert = Database['public']['Tables']['customers']['Insert']
 
+// Party purchases type definitions
+export interface PartyPurchase {
+  id: string;
+  party_name: string;
+  item_name: string;
+  barcode?: string;
+  purchase_price: number;
+  selling_price: number;
+  purchased_quantity: number;
+  remaining_quantity: number;
+  purchase_date: string;
+  notes?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export type PartyPurchaseInsert = Omit<PartyPurchase, 'id' | 'created_at' | 'updated_at'>;
+
 // Helper functions for common operations
 
 // Products
 export const getProducts = async () => {
   const { data, error } = await supabase
     .from('products')
-    .select(`
-      *,
-      categories (
-        id,
-        name
-      )
-    `)
+    .select('*')
     .order('created_at', { ascending: false })
 
   if (error) throw error
@@ -52,13 +64,7 @@ export const getProducts = async () => {
 export const getProductById = async (id: string) => {
   const { data, error } = await supabase
     .from('products')
-    .select(`
-      *,
-      categories (
-        id,
-        name
-      )
-    `)
+    .select('*')
     .eq('id', id)
     .single()
 
@@ -107,10 +113,6 @@ export const getSales = async (limit?: number) => {
       products (
         id,
         name
-      ),
-      profiles (
-        id,
-        full_name
       )
     `)
     .order('created_at', { ascending: false })
@@ -131,6 +133,35 @@ export const createSale = async (sale: SaleInsert) => {
     .insert(sale)
     .select()
     .single()
+
+  if (error) throw error
+  return data
+}
+
+export const deleteSale = async (saleId: string) => {
+  const { data, error } = await supabase
+    .from('sales')
+    .delete()
+    .eq('id', saleId)
+    .select()
+    .single()
+
+  if (error) throw error
+  return data
+}
+
+export const getSalesByDate = async (date: string) => {
+  const { data, error } = await supabase
+    .from('sales')
+    .select(`
+      *,
+      products (
+        id,
+        name
+      )
+    `)
+    .eq('sale_date', date)
+    .order('created_at', { ascending: false })
 
   if (error) throw error
   return data
@@ -230,6 +261,65 @@ export const subscribeToSales = (callback: (payload: any) => void) => {
       callback
     )
     .subscribe()
+}
+
+// Party Purchases
+export const getPartyPurchases = async () => {
+  // For now, we'll use localStorage until the database table is created
+  try {
+    const data = localStorage.getItem('party_purchases');
+    return data ? JSON.parse(data) : [];
+  } catch (error) {
+    console.error('Error fetching party purchases:', error);
+    return [];
+  }
+}
+
+export const createPartyPurchase = async (purchase: PartyPurchaseInsert) => {
+  try {
+    const existingData = await getPartyPurchases();
+    const newPurchase: PartyPurchase = {
+      ...purchase,
+      id: Date.now().toString(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    
+    const updatedData = [newPurchase, ...existingData];
+    localStorage.setItem('party_purchases', JSON.stringify(updatedData));
+    return newPurchase;
+  } catch (error) {
+    console.error('Error creating party purchase:', error);
+    throw error;
+  }
+}
+
+export const updatePartyPurchase = async (id: string, updates: Partial<PartyPurchaseInsert>) => {
+  try {
+    const existingData = await getPartyPurchases();
+    const updatedData = existingData.map((purchase: PartyPurchase) => 
+      purchase.id === id 
+        ? { ...purchase, ...updates, updated_at: new Date().toISOString() }
+        : purchase
+    );
+    
+    localStorage.setItem('party_purchases', JSON.stringify(updatedData));
+    return updatedData.find((p: PartyPurchase) => p.id === id);
+  } catch (error) {
+    console.error('Error updating party purchase:', error);
+    throw error;
+  }
+}
+
+export const deletePartyPurchase = async (id: string) => {
+  try {
+    const existingData = await getPartyPurchases();
+    const updatedData = existingData.filter((purchase: PartyPurchase) => purchase.id !== id);
+    localStorage.setItem('party_purchases', JSON.stringify(updatedData));
+  } catch (error) {
+    console.error('Error deleting party purchase:', error);
+    throw error;
+  }
 }
 
 // Authentication helpers

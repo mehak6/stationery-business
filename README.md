@@ -150,12 +150,18 @@ npm run dev
 See `SUPABASE_SETUP.md` for detailed setup instructions.
 
 ### Available Scripts
-- `npm run dev`: Development server
+- `npm run dev`: Development server (currently running on localhost:3001)
 - `npm run build`: Production build
 - `npm run start`: Production server
 - `npm run lint`: Code linting
 - `npm run type-check`: TypeScript checking
 - `npm run deploy`: Deploy to Vercel
+
+### Current Status
+🟢 **Server Status**: Running on http://localhost:3001  
+🟢 **Database**: Connected and functional  
+🟢 **Recent Sales**: Dashboard displaying correctly  
+🟢 **All Features**: Fully operational with real data
 
 ## 🎨 UI/UX Features
 
@@ -245,8 +251,12 @@ Potential areas for expansion:
 
 ## 📝 Development Notes
 
-### Mock Data
-The application includes comprehensive mock data for development and testing, ensuring functionality works even without database connectivity.
+### Recent Updates (2025-08-30)
+✅ **Dashboard Issues Fixed**:
+- Fixed recent sales display issue by removing invalid `profiles` table join from getSales function
+- "Make Sale" button properly navigates to quick-sale page
+- All mock data removed - application now uses 100% real database integration
+- Server running on http://localhost:3001 (auto-switched from 3000)
 
 ### Error Handling Strategy
 - Multiple layers of error handling
@@ -314,10 +324,15 @@ The project uses a sophisticated Tailwind CSS setup with custom component classe
 5. **Multi-tenancy** - Database structure supports it
 
 ### Key Files to Monitor
-- `supabase_client.ts`: API layer and business logic
-- `InventoryApp.tsx`: Main application state and routing
+- `supabase_client.ts`: API layer and business logic (✅ Recently fixed getSales function)
+- `InventoryApp.tsx`: Main application state and routing (✅ Dashboard sales display fixed)
 - `globals.css`: Design system and component styles
 - `database.types.ts`: Type definitions (auto-generated from Supabase)
+
+### Recent Bug Fixes
+- **supabase_client.ts:102-111** - Removed invalid `profiles` table join from getSales function
+- **Dashboard sales display** - Recent sales now showing correctly with real data
+- **Mock data removal** - Complete migration to real Supabase database integration
 
 ### Performance Considerations
 - **Bundle optimization**: Next.js automatic code splitting

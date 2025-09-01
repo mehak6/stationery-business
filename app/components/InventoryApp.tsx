@@ -10,23 +10,45 @@ import {
   DollarSign,
   Edit,
   Trash2,
-  FileImage,
   X,
-  Check
+  Check,
+  Users,
+  Upload
 } from 'lucide-react';
+import {
+  LineChart,
+  Line,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell
+} from 'recharts';
 
 // Import Supabase functions
 import {
   getProducts,
   getSales,
-  getCategories,
   createProduct,
   createSale,
   updateProduct,
+  deleteProduct,
+  deleteSale,
+  getSalesByDate,
   getAnalytics,
+  getPartyPurchases,
+  createPartyPurchase,
+  updatePartyPurchase,
+  deletePartyPurchase,
   type Product,
   type Sale,
-  type Category
+  type PartyPurchase,
+  type PartyPurchaseInsert
 } from '../../supabase_client';
 
 // No more mock data - using real Supabase data throughout the application
@@ -45,6 +67,8 @@ function Dashboard({ onNavigate }) {
   const [recentSales, setRecentSales] = useState([]);
   const [lowStockItems, setLowStockItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [chartData, setChartData] = useState([]);
+  const [categoryData, setCategoryData] = useState([]);
 
   // Fetch dashboard data on component mount
   useEffect(() => {
@@ -71,6 +95,33 @@ function Dashboard({ onNavigate }) {
         // Filter low stock items
         const lowStock = (productsData || []).filter(p => p.stock_quantity <= p.min_stock_level);
         setLowStockItems(lowStock);
+
+        // Prepare chart data (last 7 days sales)
+        const last7Days = [];
+        for (let i = 6; i >= 0; i--) {
+          const date = new Date();
+          date.setDate(date.getDate() - i);
+          const dateStr = date.toISOString().split('T')[0];
+          
+          const daySales = (salesData || []).filter(sale => 
+            sale.sale_date === dateStr
+          );
+          
+          const dayRevenue = daySales.reduce((sum, sale) => sum + (sale.total_amount || 0), 0);
+          const dayProfit = daySales.reduce((sum, sale) => sum + (sale.profit || 0), 0);
+          
+          last7Days.push({
+            date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+            sales: daySales.length,
+            revenue: dayRevenue,
+            profit: dayProfit
+          });
+        }
+        setChartData(last7Days);
+
+        // Simplified product count for pie chart
+        const totalProducts = (productsData || []).length;
+        setCategoryData([{ name: 'All Products', value: totalProducts }]);
         
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
@@ -84,6 +135,38 @@ function Dashboard({ onNavigate }) {
 
     fetchDashboardData();
   }, []);
+
+  const handleDeleteSale = async (saleId: string, saleData: any) => {
+    if (!confirm(`Are you sure you want to delete this sale of ${saleData.products?.name || 'Unknown Product'}? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      await deleteSale(saleId);
+      
+      // Update recent sales by removing the deleted sale
+      setRecentSales(prevSales => prevSales.filter(sale => sale.id !== saleId));
+      
+      // Refresh dashboard data to update analytics
+      const [analyticsData] = await Promise.all([
+        getAnalytics()
+      ]);
+      
+      setAnalytics(analyticsData || {
+        totalProducts: 0,
+        totalSales: 0,
+        totalProfit: 0,
+        todaySales: 0,
+        todayProfit: 0,
+        lowStockProducts: 0
+      });
+      
+      alert('Sale deleted successfully!');
+    } catch (error) {
+      console.error('Error deleting sale:', error);
+      alert('Error deleting sale: ' + error.message);
+    }
+  };
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
@@ -142,23 +225,42 @@ function Dashboard({ onNavigate }) {
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-900">Recent Sales</h3>
             <button 
-              onClick={() => onNavigate('sales')}
+              onClick={() => onNavigate('quick-sale')}
               className="text-primary-600 hover:text-primary-700 font-medium"
             >
-              View All
+              Make Sale
             </button>
           </div>
           <div className="space-y-4">
+            {recentSales.length === 0 && (
+              <div className="text-center py-8">
+                <p className="text-gray-500">No recent sales</p>
+                <button 
+                  onClick={() => onNavigate('quick-sale')}
+                  className="mt-2 btn-primary"
+                >
+                  Make Your First Sale
+                </button>
+              </div>
+            )}
             {recentSales.map(sale => (
               <div key={sale.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                <div>
+                <div className="flex-1">
                   <p className="font-medium text-gray-900">{sale.products?.name || 'Unknown Product'}</p>
                   <p className="text-sm text-gray-500">Qty: {sale.quantity} • ₹{sale.unit_price}</p>
+                  <p className="text-xs text-gray-400">Date: {new Date(sale.sale_date).toLocaleDateString()}</p>
                 </div>
-                <div className="text-right">
+                <div className="text-right mr-3">
                   <p className="font-medium text-gray-900">₹{sale.total_amount}</p>
                   <p className="text-sm text-secondary-600">Profit: ₹{sale.profit}</p>
                 </div>
+                <button
+                  onClick={() => handleDeleteSale(sale.id, sale)}
+                  className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
+                  title="Delete Sale"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
               </div>
             ))}
           </div>
@@ -180,7 +282,6 @@ function Dashboard({ onNavigate }) {
               <div key={product.id} className="flex items-center justify-between p-4 bg-danger-50 rounded-lg border border-danger-200">
                 <div>
                   <p className="font-medium text-gray-900">{product.name}</p>
-                  <p className="text-sm text-gray-500">{product.categories?.name || 'No Category'}</p>
                 </div>
                 <div className="text-right">
                   <p className="font-medium text-danger-600">{product.stock_quantity} left</p>
@@ -209,6 +310,68 @@ function Dashboard({ onNavigate }) {
           <Plus className="h-6 w-6" />
         </button>
       </div>
+
+      {/* Charts Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mt-8">
+        {/* Sales Trend Chart */}
+        <div className="lg:col-span-2 card">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Sales Trend (Last 7 Days)</h3>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip />
+                <Area 
+                  type="monotone" 
+                  dataKey="revenue" 
+                  stroke="#3b82f6" 
+                  fill="#3b82f6" 
+                  fillOpacity={0.2}
+                  name="Revenue (₹)"
+                />
+                <Area 
+                  type="monotone" 
+                  dataKey="profit" 
+                  stroke="#10b981" 
+                  fill="#10b981" 
+                  fillOpacity={0.2}
+                  name="Profit (₹)"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Category Distribution */}
+        <div className="card">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">Inventory by Category</h3>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={categoryData}
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={80}
+                  fill="#8884d8"
+                  dataKey="value"
+                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                >
+                  {categoryData.map((entry, index) => (
+                    <Cell 
+                      key={`cell-${index}`} 
+                      fill={['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'][index % 5]}
+                    />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -216,28 +379,20 @@ function Dashboard({ onNavigate }) {
 // Product Management Component
 function ProductManagement({ onNavigate }) {
   const [products, setProducts] = useState([]);
-  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
 
-  // Fetch products and categories on component mount
+  // Fetch products on component mount
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const [productsData, categoriesData] = await Promise.all([
-          getProducts(),
-          getCategories()
-        ]);
+        const productsData = await getProducts();
         setProducts(productsData || []);
-        setCategories(categoriesData || []);
       } catch (error) {
         console.error('Error fetching data:', error);
-        // Set empty arrays on error
         setProducts([]);
-        setCategories([]);
       } finally {
         setLoading(false);
       }
@@ -249,13 +404,21 @@ function ProductManagement({ onNavigate }) {
   const filteredProducts = products.filter(product => {
     const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          product.barcode?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = !selectedCategory || (product.categories?.name === selectedCategory);
-    return matchesSearch && matchesCategory;
+    return matchesSearch;
   });
 
-  const handleDeleteProduct = (productId) => {
-    if (confirm('Are you sure you want to delete this product?')) {
+  const handleDeleteProduct = async (productId: string) => {
+    if (!confirm('Are you sure you want to delete this product? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      await deleteProduct(productId);
       setProducts(products.filter(p => p.id !== productId));
+      alert('Product deleted successfully!');
+    } catch (error) {
+      console.error('Error deleting product:', error);
+      alert('Error deleting product: ' + error.message);
     }
   };
 
@@ -276,48 +439,41 @@ function ProductManagement({ onNavigate }) {
         </button>
       </div>
 
-      {/* Filters */}
+      {/* Search */}
       <div className="card mb-6">
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div className="flex-1">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search products..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="input-field pl-10"
-              />
-            </div>
-          </div>
-          <div className="sm:w-48">
-            <select
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
-              className="input-field"
-            >
-              <option value="">All Categories</option>
-              {categories.map(category => (
-                <option key={category.id} value={category.name}>{category.name}</option>
-              ))}
-            </select>
-          </div>
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search products..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="input-field pl-10"
+          />
         </div>
       </div>
 
       {/* Products Grid */}
       {loading ? (
-        <div className="flex justify-center items-center py-12">
-          <div className="loading-spinner"></div>
-          <span className="ml-3 text-gray-600">Loading products...</span>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="card">
+              <div className="skeleton-card mb-4"></div>
+              <div className="skeleton-title mb-2"></div>
+              <div className="skeleton-text mb-2 w-3/4"></div>
+              <div className="skeleton-text mb-4 w-1/2"></div>
+              <div className="flex justify-between items-center">
+                <div className="skeleton-text w-1/3"></div>
+                <div className="skeleton-text w-1/4"></div>
+              </div>
+            </div>
+          ))}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredProducts.map(product => (
           <div key={product.id} className="card hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-between mb-4">
-              <span className="badge-info">{product.categories?.name || 'No Category'}</span>
+            <div className="flex items-center justify-end mb-4">
               <div className="flex gap-2">
                 <button className="p-1 text-gray-400 hover:text-primary-600">
                   <Edit className="h-4 w-4" />
@@ -332,9 +488,6 @@ function ProductManagement({ onNavigate }) {
             </div>
 
             <div className="mb-4">
-              <div className="w-full h-32 bg-gray-100 rounded-lg flex items-center justify-center mb-3">
-                <FileImage className="h-12 w-12 text-gray-400" />
-              </div>
               <h3 className="font-semibold text-gray-900">{product.name}</h3>
               <p className="text-sm text-gray-500">Code: {product.barcode}</p>
             </div>
@@ -369,7 +522,6 @@ function ProductManagement({ onNavigate }) {
       {/* Add Product Modal */}
       {showAddForm && (
         <AddProductModal 
-          categories={categories}
           onClose={() => setShowAddForm(false)}
           onProductAdded={(newProduct) => {
             setProducts([newProduct, ...products]);
@@ -382,10 +534,9 @@ function ProductManagement({ onNavigate }) {
 }
 
 // Add Product Modal Component  
-function AddProductModal({ categories, onClose, onProductAdded }) {
+function AddProductModal({ onClose, onProductAdded }) {
   const [formData, setFormData] = useState({
     name: '',
-    category_id: '',
     barcode: '',
     purchase_price: '',
     selling_price: '',
@@ -400,7 +551,7 @@ function AddProductModal({ categories, onClose, onProductAdded }) {
       // Convert form data to proper types
       const productData = {
         name: formData.name,
-        category_id: formData.category_id || null,
+        category_id: null,
         barcode: formData.barcode || null,
         purchase_price: parseFloat(formData.purchase_price),
         selling_price: parseFloat(formData.selling_price),
@@ -412,14 +563,7 @@ function AddProductModal({ categories, onClose, onProductAdded }) {
       // Create product in Supabase
       const newProduct = await createProduct(productData);
       
-      // Add the category information for display
-      const category = categories.find(cat => cat.id === productData.category_id);
-      const productWithCategory = {
-        ...newProduct,
-        categories: category
-      };
-
-      onProductAdded(productWithCategory);
+      onProductAdded(newProduct);
       alert('Product added successfully!');
       
     } catch (error) {
@@ -452,20 +596,6 @@ function AddProductModal({ categories, onClose, onProductAdded }) {
               />
             </div>
 
-            <div className="form-group">
-              <label className="form-label">Category *</label>
-              <select
-                required
-                value={formData.category_id}
-                onChange={(e) => setFormData({...formData, category_id: e.target.value})}
-                className="input-field"
-              >
-                <option value="">Select category</option>
-                {categories.map(category => (
-                  <option key={category.id} value={category.id}>{category.name}</option>
-                ))}
-              </select>
-            </div>
 
             <div className="form-group">
               <label className="form-label">Barcode</label>
@@ -561,13 +691,12 @@ function AddProductModal({ categories, onClose, onProductAdded }) {
 function QuickSale({ onNavigate }) {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [quantity, setQuantity] = useState(1);
-  const [customerInfo, setCustomerInfo] = useState({
-    name: '',
-    phone: ''
-  });
+  const [saleDate, setSaleDate] = useState(new Date().toISOString().split('T')[0]);
   const [searchTerm, setSearchTerm] = useState('');
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [dateSales, setDateSales] = useState([]);
+  const [dateSummary, setDateSummary] = useState({ totalQuantity: 0, totalAmount: 0, totalProfit: 0 });
 
   // Fetch products on component mount
   useEffect(() => {
@@ -586,6 +715,32 @@ function QuickSale({ onNavigate }) {
 
     fetchProducts();
   }, []);
+
+  // Fetch sales for selected date
+  useEffect(() => {
+    const fetchDateSales = async () => {
+      try {
+        const salesData = await getSalesByDate(saleDate);
+        setDateSales(salesData || []);
+        
+        // Calculate summary
+        const summary = (salesData || []).reduce((acc, sale) => {
+          acc.totalQuantity += sale.quantity;
+          acc.totalAmount += sale.total_amount;
+          acc.totalProfit += sale.profit;
+          return acc;
+        }, { totalQuantity: 0, totalAmount: 0, totalProfit: 0 });
+        
+        setDateSummary(summary);
+      } catch (error) {
+        console.error('Error fetching date sales:', error);
+        setDateSales([]);
+        setDateSummary({ totalQuantity: 0, totalAmount: 0, totalProfit: 0 });
+      }
+    };
+
+    fetchDateSales();
+  }, [saleDate]);
 
   const filteredProducts = products.filter(product =>
     product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -610,15 +765,12 @@ function QuickSale({ onNavigate }) {
       // Create sale record
       const saleData = {
         product_id: selectedProduct.id,
-        quantity: parseInt(quantity),
+        quantity: parseInt(quantity.toString()),
         unit_price: parseFloat(selectedProduct.selling_price),
         total_amount: totalAmount,
         profit: profit,
-        customer_info: customerInfo.name || customerInfo.phone ? {
-          name: customerInfo.name || null,
-          phone: customerInfo.phone || null
-        } : null,
-        sale_date: new Date().toISOString().split('T')[0], // Today's date
+        customer_info: null,
+        sale_date: saleDate,
         notes: null
       };
 
@@ -639,12 +791,24 @@ function QuickSale({ onNavigate }) {
         )
       );
 
+      // Refresh date sales to show updated data
+      const updatedSalesData = await getSalesByDate(saleDate);
+      setDateSales(updatedSalesData || []);
+      
+      // Update date summary
+      const newSummary = (updatedSalesData || []).reduce((acc, sale) => {
+        acc.totalQuantity += sale.quantity;
+        acc.totalAmount += sale.total_amount;
+        acc.totalProfit += sale.profit;
+        return acc;
+      }, { totalQuantity: 0, totalAmount: 0, totalProfit: 0 });
+      setDateSummary(newSummary);
+
       alert(`Sale completed! Total: ₹${totalAmount.toFixed(2)}`);
       
-      // Reset form
+      // Reset form (keep the same date)
       setSelectedProduct(null);
       setQuantity(1);
-      setCustomerInfo({ name: '', phone: '' });
       setSearchTerm('');
 
     } catch (error) {
@@ -661,7 +825,7 @@ function QuickSale({ onNavigate }) {
         <p className="text-gray-600 mt-2">Process sales quickly and efficiently</p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Product Selection */}
         <div className="card">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Select Product</h3>
@@ -693,7 +857,7 @@ function QuickSale({ onNavigate }) {
                 <div className="flex items-center justify-between">
                   <div>
                     <h4 className="font-medium text-gray-900">{product.name}</h4>
-                    <p className="text-sm text-gray-500">{product.categories?.name || 'No Category'} • {product.barcode}</p>
+                    <p className="text-sm text-gray-500">{product.barcode}</p>
                     <p className="text-sm font-medium text-secondary-600">₹{product.selling_price}</p>
                   </div>
                   <div className="text-right">
@@ -752,27 +916,16 @@ function QuickSale({ onNavigate }) {
                 </p>
               </div>
 
-              {/* Customer Info */}
-              <div className="space-y-4">
-                <h4 className="font-medium text-gray-900">Customer Information (Optional)</h4>
-                <div className="form-group">
-                  <input
-                    type="text"
-                    placeholder="Customer name"
-                    value={customerInfo.name}
-                    onChange={(e) => setCustomerInfo({...customerInfo, name: e.target.value})}
-                    className="input-field"
-                  />
-                </div>
-                <div className="form-group">
-                  <input
-                    type="tel"
-                    placeholder="Phone number"
-                    value={customerInfo.phone}
-                    onChange={(e) => setCustomerInfo({...customerInfo, phone: e.target.value})}
-                    className="input-field"
-                  />
-                </div>
+              {/* Sale Date */}
+              <div className="form-group">
+                <label className="form-label">Sale Date</label>
+                <input
+                  type="date"
+                  value={saleDate}
+                  onChange={(e) => setSaleDate(e.target.value)}
+                  className="input-field"
+                  max={new Date().toISOString().split('T')[0]}
+                />
               </div>
 
               {/* Sale Summary */}
@@ -803,7 +956,7 @@ function QuickSale({ onNavigate }) {
                   onClick={() => {
                     setSelectedProduct(null);
                     setQuantity(1);
-                    setCustomerInfo({ name: '', phone: '' });
+                    setSaleDate(new Date().toISOString().split('T')[0]);
                   }}
                   className="btn-outline flex-1"
                 >
@@ -824,6 +977,520 @@ function QuickSale({ onNavigate }) {
               <p className="text-gray-500">Select a product to start a sale</p>
             </div>
           )}
+        </div>
+
+        {/* Date Sales Summary */}
+        <div className="card">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            Sales for {new Date(saleDate).toLocaleDateString()}
+          </h3>
+          
+          {/* Summary Stats */}
+          <div className="grid grid-cols-1 gap-4 mb-6">
+            <div className="bg-primary-50 p-4 rounded-lg">
+              <p className="text-sm text-primary-600 font-medium">Total Items Sold</p>
+              <p className="text-2xl font-bold text-primary-700">{dateSummary.totalQuantity}</p>
+            </div>
+            <div className="bg-secondary-50 p-4 rounded-lg">
+              <p className="text-sm text-secondary-600 font-medium">Total Revenue</p>
+              <p className="text-2xl font-bold text-secondary-700">₹{dateSummary.totalAmount.toFixed(2)}</p>
+            </div>
+            <div className="bg-accent-50 p-4 rounded-lg">
+              <p className="text-sm text-accent-600 font-medium">Total Profit</p>
+              <p className="text-2xl font-bold text-accent-700">₹{dateSummary.totalProfit.toFixed(2)}</p>
+            </div>
+          </div>
+
+          {/* Sales List */}
+          <div className="space-y-3 max-h-96 overflow-y-auto">
+            <h4 className="font-medium text-gray-900">Sales Details</h4>
+            {dateSales.length === 0 ? (
+              <div className="text-center py-8">
+                <BarChart3 className="h-12 w-12 text-gray-300 mx-auto mb-2" />
+                <p className="text-gray-500 text-sm">No sales recorded for this date</p>
+              </div>
+            ) : (
+              dateSales.map(sale => (
+                <div key={sale.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div className="flex-1">
+                    <p className="font-medium text-gray-900 text-sm">{sale.products?.name || 'Unknown Product'}</p>
+                    <p className="text-xs text-gray-500">Qty: {sale.quantity} • Unit: ₹{sale.unit_price}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-medium text-gray-900 text-sm">₹{sale.total_amount}</p>
+                    <p className="text-xs text-secondary-600">+₹{sale.profit}</p>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Party Management Component
+function PartyManagement({ onNavigate }) {
+  const [partyPurchases, setPartyPurchases] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [selectedPurchase, setSelectedPurchase] = useState(null);
+
+  // Fetch party purchases on component mount
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        const purchasesData = await getPartyPurchases();
+        setPartyPurchases(purchasesData || []);
+      } catch (error) {
+        console.error('Error fetching party purchases:', error);
+        setPartyPurchases([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  const filteredPurchases = partyPurchases.filter(purchase =>
+    purchase.item_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    purchase.party_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    purchase.barcode?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const handleDeletePurchase = async (purchaseId: string) => {
+    if (!confirm('Are you sure you want to delete this purchase record?')) {
+      return;
+    }
+
+    try {
+      await deletePartyPurchase(purchaseId);
+      setPartyPurchases(partyPurchases.filter(p => p.id !== purchaseId));
+      alert('Purchase record deleted successfully!');
+    } catch (error) {
+      console.error('Error deleting purchase:', error);
+      alert('Error deleting purchase: ' + error.message);
+    }
+  };
+
+  return (
+    <div className="p-6 bg-gray-50 min-h-screen">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Party Purchases</h1>
+          <p className="text-gray-600 mt-2">Manage your purchased inventory from suppliers</p>
+        </div>
+        <div className="flex gap-3 mt-4 sm:mt-0">
+          <button 
+            onClick={() => setShowAddForm(true)}
+            className="btn-primary"
+          >
+            <Plus className="h-5 w-5 mr-2" />
+            Add Purchase
+          </button>
+          <button 
+            className="btn-outline"
+            title="Upload Excel/PDF (Coming Soon)"
+            disabled
+          >
+            <Upload className="h-5 w-5 mr-2" />
+            Upload File
+          </button>
+        </div>
+      </div>
+
+      {/* Search */}
+      <div className="card mb-6">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search purchases..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="input-field pl-10"
+          />
+        </div>
+      </div>
+
+      {/* Purchases Grid */}
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="card">
+              <div className="skeleton-title mb-2"></div>
+              <div className="skeleton-text mb-2 w-3/4"></div>
+              <div className="skeleton-text mb-4 w-1/2"></div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredPurchases.map(purchase => (
+            <div key={purchase.id} className="card hover:shadow-md transition-shadow">
+              <div className="flex items-center justify-between mb-4">
+                <span className="badge-info">{purchase.party_name}</span>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => {
+                      setSelectedPurchase(purchase);
+                      setShowTransferModal(true);
+                    }}
+                    className="p-1 text-gray-400 hover:text-primary-600"
+                    title="Transfer to Products"
+                  >
+                    <Package className="h-4 w-4" />
+                  </button>
+                  <button 
+                    onClick={() => handleDeletePurchase(purchase.id)}
+                    className="p-1 text-gray-400 hover:text-danger-600"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="mb-4">
+                <h3 className="font-semibold text-gray-900">{purchase.item_name}</h3>
+                <p className="text-sm text-gray-500">
+                  {purchase.barcode && `Code: ${purchase.barcode}`}
+                </p>
+                <p className="text-xs text-gray-400">
+                  Purchase Date: {new Date(purchase.purchase_date).toLocaleDateString()}
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-500">Purchase:</span>
+                  <span className="font-medium">₹{purchase.purchase_price}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-500">Selling:</span>
+                  <span className="font-medium text-secondary-600">₹{purchase.selling_price}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-500">Purchased:</span>
+                  <span className="font-medium text-gray-900">{purchase.purchased_quantity} units</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-500">Remaining:</span>
+                  <span className={`font-medium ${purchase.remaining_quantity <= 0 ? 'text-danger-600' : 'text-accent-600'}`}>
+                    {purchase.remaining_quantity} units
+                  </span>
+                </div>
+              </div>
+
+              {purchase.notes && (
+                <div className="mt-3 p-2 bg-gray-50 rounded-lg">
+                  <p className="text-xs text-gray-600">{purchase.notes}</p>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Add Purchase Modal */}
+      {showAddForm && (
+        <AddPurchaseModal 
+          onClose={() => setShowAddForm(false)}
+          onPurchaseAdded={(newPurchase) => {
+            setPartyPurchases([newPurchase, ...partyPurchases]);
+            setShowAddForm(false);
+          }}
+        />
+      )}
+
+      {/* Transfer to Products Modal */}
+      {showTransferModal && selectedPurchase && (
+        <TransferModal 
+          purchase={selectedPurchase}
+          onClose={() => {
+            setShowTransferModal(false);
+            setSelectedPurchase(null);
+          }}
+          onTransferComplete={(updatedPurchase) => {
+            setPartyPurchases(partyPurchases.map(p => 
+              p.id === updatedPurchase.id ? updatedPurchase : p
+            ));
+            setShowTransferModal(false);
+            setSelectedPurchase(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Add Purchase Modal Component
+function AddPurchaseModal({ onClose, onPurchaseAdded }) {
+  const [formData, setFormData] = useState({
+    party_name: '',
+    item_name: '',
+    barcode: '',
+    purchase_price: '',
+    selling_price: '',
+    purchased_quantity: '',
+    purchase_date: new Date().toISOString().split('T')[0],
+    notes: ''
+  });
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const purchaseData: PartyPurchaseInsert = {
+        party_name: formData.party_name,
+        item_name: formData.item_name,
+        barcode: formData.barcode || undefined,
+        purchase_price: parseFloat(formData.purchase_price),
+        selling_price: parseFloat(formData.selling_price),
+        purchased_quantity: parseInt(formData.purchased_quantity),
+        remaining_quantity: parseInt(formData.purchased_quantity),
+        purchase_date: formData.purchase_date,
+        notes: formData.notes || undefined
+      };
+
+      const newPurchase = await createPartyPurchase(purchaseData);
+      onPurchaseAdded(newPurchase);
+      alert('Purchase record added successfully!');
+    } catch (error) {
+      console.error('Error adding purchase:', error);
+      alert('Error adding purchase: ' + error.message);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+        <div className="p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-bold text-gray-900">Add Purchase Record</h2>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+              <X className="h-6 w-6" />
+            </button>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="form-group">
+                <label className="form-label">Party Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.party_name}
+                  onChange={(e) => setFormData({...formData, party_name: e.target.value})}
+                  className="input-field"
+                  placeholder="Supplier name"
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Purchase Date *</label>
+                <input
+                  type="date"
+                  required
+                  value={formData.purchase_date}
+                  onChange={(e) => setFormData({...formData, purchase_date: e.target.value})}
+                  className="input-field"
+                />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Item Name *</label>
+              <input
+                type="text"
+                required
+                value={formData.item_name}
+                onChange={(e) => setFormData({...formData, item_name: e.target.value})}
+                className="input-field"
+                placeholder="Product name"
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Barcode</label>
+              <input
+                type="text"
+                value={formData.barcode}
+                onChange={(e) => setFormData({...formData, barcode: e.target.value})}
+                className="input-field"
+                placeholder="Product code"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="form-group">
+                <label className="form-label">Purchase Price *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  value={formData.purchase_price}
+                  onChange={(e) => setFormData({...formData, purchase_price: e.target.value})}
+                  className="input-field"
+                  placeholder="0.00"
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Selling Price *</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  required
+                  value={formData.selling_price}
+                  onChange={(e) => setFormData({...formData, selling_price: e.target.value})}
+                  className="input-field"
+                  placeholder="0.00"
+                />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Purchased Quantity *</label>
+              <input
+                type="number"
+                required
+                value={formData.purchased_quantity}
+                onChange={(e) => setFormData({...formData, purchased_quantity: e.target.value})}
+                className="input-field"
+                placeholder="0"
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Notes</label>
+              <textarea
+                value={formData.notes}
+                onChange={(e) => setFormData({...formData, notes: e.target.value})}
+                className="input-field"
+                rows={3}
+                placeholder="Additional notes (optional)"
+              />
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <button type="button" onClick={onClose} className="btn-outline flex-1">
+                Cancel
+              </button>
+              <button type="submit" className="btn-primary flex-1">
+                Add Purchase
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Transfer Modal Component
+function TransferModal({ purchase, onClose, onTransferComplete }) {
+  const [transferQuantity, setTransferQuantity] = useState(1);
+
+  const handleTransfer = async () => {
+    if (transferQuantity > purchase.remaining_quantity) {
+      alert('Transfer quantity cannot exceed remaining quantity!');
+      return;
+    }
+
+    try {
+      // Create product in main inventory
+      const productData = {
+        name: purchase.item_name,
+        category_id: null,
+        barcode: purchase.barcode || null,
+        purchase_price: purchase.purchase_price,
+        selling_price: purchase.selling_price,
+        stock_quantity: transferQuantity,
+        min_stock_level: 5,
+        description: `Transferred from ${purchase.party_name} purchase`
+      };
+
+      await createProduct(productData);
+
+      // Update remaining quantity in party purchase
+      const newRemainingQuantity = purchase.remaining_quantity - transferQuantity;
+      const updatedPurchase = await updatePartyPurchase(purchase.id, {
+        remaining_quantity: newRemainingQuantity
+      });
+
+      onTransferComplete(updatedPurchase);
+      alert(`Successfully transferred ${transferQuantity} units to Products inventory!`);
+    } catch (error) {
+      console.error('Error transferring to products:', error);
+      alert('Error transferring to products: ' + error.message);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-xl max-w-md w-full">
+        <div className="p-6">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-bold text-gray-900">Transfer to Products</h2>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+              <X className="h-6 w-6" />
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            <div className="p-4 bg-gray-50 rounded-lg">
+              <h3 className="font-medium text-gray-900">{purchase.item_name}</h3>
+              <p className="text-sm text-gray-500">From: {purchase.party_name}</p>
+              <p className="text-sm text-gray-500">Available: {purchase.remaining_quantity} units</p>
+            </div>
+
+
+            <div className="form-group">
+              <label className="form-label">Transfer Quantity</label>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setTransferQuantity(Math.max(1, transferQuantity - 1))}
+                  className="btn-outline px-3 py-2"
+                >
+                  -
+                </button>
+                <input
+                  type="number"
+                  min="1"
+                  max={purchase.remaining_quantity}
+                  value={transferQuantity}
+                  onChange={(e) => setTransferQuantity(parseInt(e.target.value) || 1)}
+                  className="input-field text-center w-20"
+                />
+                <button
+                  type="button"
+                  onClick={() => setTransferQuantity(Math.min(purchase.remaining_quantity, transferQuantity + 1))}
+                  className="btn-outline px-3 py-2"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <button onClick={onClose} className="btn-outline flex-1">
+                Cancel
+              </button>
+              <button
+                onClick={handleTransfer}
+                className="btn-success flex-1"
+                disabled={transferQuantity <= 0 || transferQuantity > purchase.remaining_quantity}
+              >
+                Transfer
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -846,6 +1513,8 @@ function InventoryApp() {
         return <ProductManagement onNavigate={handleNavigate} />;
       case 'quick-sale':
         return <QuickSale onNavigate={handleNavigate} />;
+      case 'party':
+        return <PartyManagement onNavigate={handleNavigate} />;
       default:
         return <Dashboard onNavigate={handleNavigate} />;
     }
@@ -880,6 +1549,12 @@ function InventoryApp() {
                     className={`nav-link ${currentView === 'quick-sale' ? 'nav-link-active' : ''}`}
                   >
                     Quick Sale
+                  </button>
+                  <button
+                    onClick={() => setCurrentView('party')}
+                    className={`nav-link ${currentView === 'party' ? 'nav-link-active' : ''}`}
+                  >
+                    Party
                   </button>
                 </div>
               </div>

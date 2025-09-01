@@ -185,6 +185,38 @@
     border: 1px solid rgba(255, 255, 255, 0.2);
   }
 
+  /* Loading Skeletons */
+  .skeleton {
+    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background-size: 200% 100%;
+    animation: skeleton-loading 1.5s infinite;
+  }
+
+  .skeleton-text {
+    @apply skeleton rounded h-4 bg-gray-200;
+  }
+
+  .skeleton-title {
+    @apply skeleton rounded h-6 bg-gray-200;
+  }
+
+  .skeleton-card {
+    @apply skeleton rounded-lg h-24 bg-gray-200;
+  }
+
+  .skeleton-avatar {
+    @apply skeleton rounded-full h-12 w-12 bg-gray-200;
+  }
+
+  @keyframes skeleton-loading {
+    0% {
+      background-position: -200% 0;
+    }
+    100% {
+      background-position: 200% 0;
+    }
+  }
+
   /* Safe area for mobile devices */
   .safe-top {
     padding-top: env(safe-area-inset-top);

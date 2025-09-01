@@ -80,3 +80,4 @@ temp/
 
 # Build artifacts
 build/
+.vercel
