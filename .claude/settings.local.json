@@ -31,7 +31,9 @@
       "Bash(git config:*)",
       "Bash(./gh_2.40.1_linux_amd64/bin/gh auth login --web)",
       "Bash(./gh_2.40.1_linux_amd64/bin/gh repo set-default mehak6/stationery-business)",
-      "Bash(./gh_2.40.1_linux_amd64/bin/gh repo sync --force)"
+      "Bash(./gh_2.40.1_linux_amd64/bin/gh repo sync --force)",
+      "Bash(npm run type-check:*)",
+      "Bash(npm uninstall:*)"
     ],
     "deny": [],
     "ask": []

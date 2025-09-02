@@ -169,7 +169,7 @@ function Dashboard({ onNavigate }) {
   };
 
   return (
-    <div className="p-6 bg-gray-50 min-h-screen">
+    <div className="p-6 bg-primary-50 min-h-screen">
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
@@ -244,7 +244,7 @@ function Dashboard({ onNavigate }) {
               </div>
             )}
             {recentSales.map(sale => (
-              <div key={sale.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+              <div key={sale.id} className="flex items-center justify-between p-4 bg-primary-50 rounded-lg">
                 <div className="flex-1">
                   <p className="font-medium text-gray-900">{sale.products?.name || 'Unknown Product'}</p>
                   <p className="text-sm text-gray-500">Qty: {sale.quantity} • ₹{sale.unit_price}</p>
@@ -423,7 +423,7 @@ function ProductManagement({ onNavigate }) {
   };
 
   return (
-    <div className="p-6 bg-gray-50 min-h-screen">
+    <div className="p-6 bg-primary-50 min-h-screen">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
         <div>
@@ -818,7 +818,7 @@ function QuickSale({ onNavigate }) {
   };
 
   return (
-    <div className="p-6 bg-gray-50 min-h-screen">
+    <div className="p-6 bg-primary-50 min-h-screen">
       {/* Header */}
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-gray-900">Quick Sale</h1>
@@ -929,7 +929,7 @@ function QuickSale({ onNavigate }) {
               </div>
 
               {/* Sale Summary */}
-              <div className="p-4 bg-gray-50 rounded-lg">
+              <div className="p-4 bg-primary-50 rounded-lg">
                 <div className="space-y-2">
                   <div className="flex justify-between">
                     <span>Unit Price:</span>
@@ -1011,7 +1011,7 @@ function QuickSale({ onNavigate }) {
               </div>
             ) : (
               dateSales.map(sale => (
-                <div key={sale.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div key={sale.id} className="flex items-center justify-between p-3 bg-primary-50 rounded-lg">
                   <div className="flex-1">
                     <p className="font-medium text-gray-900 text-sm">{sale.products?.name || 'Unknown Product'}</p>
                     <p className="text-xs text-gray-500">Qty: {sale.quantity} • Unit: ₹{sale.unit_price}</p>
@@ -1043,15 +1043,32 @@ function PartyManagement({ onNavigate }) {
 
   // Fetch party purchases on component mount
   useEffect(() => {
+    console.log('[DEBUG] PartyManagement: useEffect triggered, about to fetch party purchases');
+
     const fetchData = async () => {
       try {
+        console.log('[DEBUG] PartyManagement: Setting loading to true');
         setLoading(true);
+
+        console.log('[DEBUG] PartyManagement: Calling getPartyPurchases()');
         const purchasesData = await getPartyPurchases();
-        setPartyPurchases(purchasesData || []);
+        console.log('[DEBUG] PartyManagement: getPartyPurchases() returned:', purchasesData);
+
+        const safeData = purchasesData || [];
+        console.log('[DEBUG] PartyManagement: Setting partyPurchases state to:', safeData);
+        setPartyPurchases(safeData);
+
+        console.log('[DEBUG] PartyManagement: Total party purchases loaded:', safeData.length);
       } catch (error) {
-        console.error('Error fetching party purchases:', error);
+        console.error('[DEBUG] PartyManagement: Error fetching party purchases:', error);
+        console.error('[DEBUG] PartyManagement: Error details:', {
+          message: error.message,
+          stack: error.stack,
+          code: error.code
+        });
         setPartyPurchases([]);
       } finally {
+        console.log('[DEBUG] PartyManagement: Setting loading to false');
         setLoading(false);
       }
     };
@@ -1059,11 +1076,18 @@ function PartyManagement({ onNavigate }) {
     fetchData();
   }, []);
 
-  const filteredPurchases = partyPurchases.filter(purchase =>
-    purchase.item_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    purchase.party_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    purchase.barcode?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredPurchases = partyPurchases.filter(purchase => {
+    const matchesSearch = purchase.item_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         purchase.party_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         purchase.barcode?.toLowerCase().includes(searchTerm.toLowerCase());
+
+    return matchesSearch;
+  });
+
+  // Debug logging for search and filtering
+  console.log('[DEBUG] PartyManagement: Search term:', searchTerm);
+  console.log('[DEBUG] PartyManagement: Total purchases before filter:', partyPurchases.length);
+  console.log('[DEBUG] PartyManagement: Filtered purchases count:', filteredPurchases.length);
 
   const handleDeletePurchase = async (purchaseId: string) => {
     if (!confirm('Are you sure you want to delete this purchase record?')) {
@@ -1081,7 +1105,7 @@ function PartyManagement({ onNavigate }) {
   };
 
   return (
-    <div className="p-6 bg-gray-50 min-h-screen">
+    <div className="p-6 bg-primary-50 min-h-screen">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
         <div>
@@ -1189,7 +1213,7 @@ function PartyManagement({ onNavigate }) {
               </div>
 
               {purchase.notes && (
-                <div className="mt-3 p-2 bg-gray-50 rounded-lg">
+                <div className="mt-3 p-2 bg-primary-50 rounded-lg">
                   <p className="text-xs text-gray-600">{purchase.notes}</p>
                 </div>
               )}
@@ -1455,7 +1479,7 @@ function TransferModal({ purchase, onClose, onTransferComplete }) {
           </div>
 
           <div className="space-y-4">
-            <div className="p-4 bg-gray-50 rounded-lg">
+            <div className="p-4 bg-primary-50 rounded-lg">
               <h3 className="font-medium text-gray-900">{purchase.item_name}</h3>
               <p className="text-sm text-gray-500">From: {purchase.party_name}</p>
               <p className="text-sm text-gray-500">Available: {purchase.remaining_quantity} units</p>
@@ -1668,40 +1692,14 @@ function FileUploadModal({ onClose, onFileProcessed }) {
         const result = Papa.parse(text, { header: true, skipEmptyLines: true });
         parsedData = result.data;
       } else if (fileExtension === 'pdf') {
-        // Parse PDF file
-        try {
-          const buffer = await file.arrayBuffer();
-          const pdf = await import('pdfjs-dist/legacy/build/pdf.js');
-          
-          // Set worker source
-          pdf.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
-          
-          const pdfDocument = await pdf.getDocument({ data: buffer }).promise;
-          let fullText = '';
-          
-          // Extract text from all pages
-          for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
-            const page = await pdfDocument.getPage(pageNum);
-            const textContent = await page.getTextContent();
-            const pageText = textContent.items.map(item => item.str).join(' ');
-            fullText += pageText + '\n';
-          }
-          
-          // Parse the extracted text into structured data
-          parsedData = parsePDFText(fullText);
-        } catch (error) {
-          console.error('PDF parsing error:', error);
-          alert('Error reading PDF file. Please ensure it contains readable text.');
-          return;
-        }
+        // PDF processing temporarily disabled due to compatibility issues
+        alert('PDF processing is temporarily disabled. Please use CSV or Excel files for bulk import, or enter data manually.');
+        parsedData = [];
+        return;
       } else {
-        // Parse Excel file
-        const XLSX = await import('xlsx');
-        const buffer = await file.arrayBuffer();
-        const workbook = XLSX.read(buffer, { type: 'buffer' });
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-        parsedData = XLSX.utils.sheet_to_json(worksheet);
+        // Unsupported file type
+        alert('Unsupported file type. Please use CSV files for bulk import or enter data manually.');
+        return;
       }
 
       // Process parsed data
@@ -1726,19 +1724,32 @@ function FileUploadModal({ onClose, onFileProcessed }) {
               notes: row.notes || 'Imported from PDF'
             };
           } else {
+            // Debug raw row data
+            console.log(`[DEBUG] Processing row ${index + 1}:`, row);
+            console.log(`[DEBUG] Row keys:`, Object.keys(row));
+
             // Map common column names for Excel/CSV (flexible mapping)
+            const itemName = row['Item Name'] || row['item_name'] || row['Product'] || row['product'] || row['Product Name'];
+            const partyName = row['Party Name'] || row['party_name'] || row['Supplier'] || row['supplier'];
+            const purchasePrice = row['Purchase Price'] || row['purchase_price'] || row['Cost Price'] || row['cost_price'];
+            const sellingPrice = row['Selling Price'] || row['selling_price'] || row['Sale Price'] || row['sale_price'];
+            const quantity = row['Quantity'] || row['quantity'] || row['Purchased Quantity'] || row['purchased_quantity'];
+            const barcode = row['Barcode'] || row['barcode'] || row['Code'] || row['code'];
+
             purchase = {
-              party_name: row['Party Name'] || row['party_name'] || row['Supplier'] || row['supplier'] || 'Unknown Party',
-              item_name: row['Item Name'] || row['item_name'] || row['Product'] || row['product'] || row['Product Name'] || `Item ${index + 1}`,
-              barcode: row['Barcode'] || row['barcode'] || row['Code'] || row['code'] || '',
-              purchase_price: parseFloat(row['Purchase Price'] || row['purchase_price'] || row['Cost Price'] || row['cost_price'] || 0),
-              selling_price: parseFloat(row['Selling Price'] || row['selling_price'] || row['Sale Price'] || row['sale_price'] || 0),
-              purchased_quantity: parseInt(row['Quantity'] || row['quantity'] || row['Purchased Quantity'] || row['purchased_quantity'] || 1),
-              remaining_quantity: parseInt(row['Quantity'] || row['quantity'] || row['Purchased Quantity'] || row['purchased_quantity'] || 1),
+              party_name: partyName || 'Unknown Party',
+              item_name: itemName || `Item ${index + 1}`,
+              barcode: barcode || '',
+              purchase_price: purchasePrice ? parseFloat(String(purchasePrice).replace(/[^\d.]/g, '')) || 0 : 0,
+              selling_price: sellingPrice ? parseFloat(String(sellingPrice).replace(/[^\d.]/g, '')) || 0 : 0,
+              purchased_quantity: quantity ? parseInt(String(quantity)) || 1 : 1,
+              remaining_quantity: quantity ? parseInt(String(quantity)) || 1 : 1,
               purchase_date: row['Purchase Date'] || row['purchase_date'] || row['Date'] || row['date'] || currentDate,
               notes: row['Notes'] || row['notes'] || row['Description'] || row['description'] || ''
             };
           }
+
+          console.log(`[DEBUG] Processed purchase ${index + 1}:`, purchase);
 
           // Validate required fields
           if (purchase.item_name && (purchase.purchase_price > 0 || purchase.selling_price > 0) && purchase.purchased_quantity > 0) {
@@ -1843,7 +1854,7 @@ function FileUploadModal({ onClose, onFileProcessed }) {
           </div>
 
           {/* Expected Format Info */}
-          <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+          <div className="mt-6 p-4 bg-primary-50 rounded-lg">
             <h3 className="font-medium text-gray-900 mb-2">Expected File Format:</h3>
             <p className="text-sm text-gray-600 mb-2">Your file should contain columns/data with these fields (flexible):</p>
             <ul className="text-sm text-gray-600 space-y-1 mb-3">
@@ -1896,7 +1907,7 @@ function InventoryApp() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-primary-50">
       {/* Navigation */}
       <nav className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

@@ -265,13 +265,60 @@ export const subscribeToSales = (callback: (payload: any) => void) => {
 
 // Party Purchases
 export const getPartyPurchases = async () => {
-  const { data, error } = await supabase
-    .from('party_purchases')
-    .select('*')
-    .order('created_at', { ascending: false })
+  console.log('[DEBUG] getPartyPurchases: Starting function call');
+  console.log('[DEBUG] getPartyPurchases: Checking Supabase environment variables');
+  console.log('[DEBUG] getPartyPurchases: NEXT_PUBLIC_SUPABASE_URL exists:', !!process.env.NEXT_PUBLIC_SUPABASE_URL);
+  console.log('[DEBUG] getPartyPurchases: NEXT_PUBLIC_SUPABASE_ANON_KEY exists:', !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 
-  if (error) throw error
-  return data
+  try {
+    // First, let's check if table exists by trying a simple query
+    console.log('[DEBUG] getPartyPurchases: Testing table existence');
+
+    // Try to query the table
+    const { data, error } = await supabase
+      .from('party_purchases')
+      .select('count', { count: 'exact', head: true })
+
+    if (error) {
+      const tableErrorMessage = 'Could not find the table';
+      if (error.message.includes(tableErrorMessage) || error.details?.includes(tableErrorMessage)) {
+        console.error('[DEBUG] getPartyPurchases: CRITICAL ERROR - party_purchases table does not exist!');
+        console.error('[DEBUG] getPartyPurchases: Please run supabase_party_purchases.sql in your Supabase SQL editor');
+        console.error('[DEBUG] getPartyPurchases: Table creation error details:', error);
+
+        throw new Error('DATABASE TABLE MISSING: party_purchases table not found. Please run the SQL setup script in Supabase.');
+      }
+
+      console.error('[DEBUG] getPartyPurchases: Supabase query error:', error);
+      console.error('[DEBUG] getPartyPurchases: Error details:', {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      });
+      throw error;
+    }
+
+    console.log('[DEBUG] getPartyPurchases: Table count query successful');
+
+    // Now get actual data
+    const { data: actualData, error: dataError } = await supabase
+      .from('party_purchases')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (dataError) {
+      console.error('[DEBUG] getPartyPurchases: Data fetch error:', dataError);
+      throw dataError;
+    }
+
+    console.log('[DEBUG] getPartyPurchases: Query successful, data returned:', actualData);
+    console.log('[DEBUG] getPartyPurchases: Number of records:', actualData?.length || 0);
+    return actualData || [];
+  } catch (error) {
+    console.error('[DEBUG] getPartyPurchases: Unexpected error:', error);
+    throw error;
+  }
 }
 
 export const createPartyPurchase = async (purchase: PartyPurchaseInsert) => {
