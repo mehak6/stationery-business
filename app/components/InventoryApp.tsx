@@ -691,6 +691,7 @@ function AddProductModal({ onClose, onProductAdded }) {
 function QuickSale({ onNavigate }) {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [quantity, setQuantity] = useState(1);
+  const [salePrice, setSalePrice] = useState(0);
   const [saleDate, setSaleDate] = useState(new Date().toISOString().split('T')[0]);
   const [searchTerm, setSearchTerm] = useState('');
   const [products, setProducts] = useState([]);
@@ -759,14 +760,15 @@ function QuickSale({ onNavigate }) {
     }
 
     try {
-      const totalAmount = selectedProduct.selling_price * quantity;
-      const profit = (selectedProduct.selling_price - selectedProduct.purchase_price) * quantity;
+      const actualSalePrice = salePrice || selectedProduct.selling_price;
+      const totalAmount = actualSalePrice * quantity;
+      const profit = (actualSalePrice - selectedProduct.purchase_price) * quantity;
 
       // Create sale record
       const saleData = {
         product_id: selectedProduct.id,
         quantity: parseInt(quantity.toString()),
-        unit_price: parseFloat(selectedProduct.selling_price),
+        unit_price: parseFloat(actualSalePrice),
         total_amount: totalAmount,
         profit: profit,
         customer_info: null,
@@ -809,6 +811,7 @@ function QuickSale({ onNavigate }) {
       // Reset form (keep the same date)
       setSelectedProduct(null);
       setQuantity(1);
+      setSalePrice(0);
       setSearchTerm('');
 
     } catch (error) {
@@ -847,7 +850,10 @@ function QuickSale({ onNavigate }) {
             {filteredProducts.map(product => (
               <div
                 key={product.id}
-                onClick={() => setSelectedProduct(product)}
+                onClick={() => {
+                  setSelectedProduct(product);
+                  setSalePrice(product.selling_price);
+                }}
                 className={`p-4 border rounded-lg cursor-pointer transition-colors ${
                   selectedProduct?.id === product.id
                     ? 'border-primary-500 bg-primary-50'
@@ -916,6 +922,34 @@ function QuickSale({ onNavigate }) {
                 </p>
               </div>
 
+              {/* Sale Price */}
+              <div className="form-group">
+                <label className="form-label">Sale Price</label>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-500">₹</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={salePrice}
+                    onChange={(e) => setSalePrice(parseFloat(e.target.value) || 0)}
+                    className="input-field flex-1"
+                    placeholder={`Default: ₹${selectedProduct?.selling_price || 0}`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setSalePrice(selectedProduct.selling_price)}
+                    className="btn-outline text-xs px-2 py-1"
+                    title="Reset to default price"
+                  >
+                    Reset
+                  </button>
+                </div>
+                <p className="text-sm text-gray-500 mt-1">
+                  Default price: ₹{selectedProduct?.selling_price}
+                </p>
+              </div>
+
               {/* Sale Date */}
               <div className="form-group">
                 <label className="form-label">Sale Date</label>
@@ -933,7 +967,7 @@ function QuickSale({ onNavigate }) {
                 <div className="space-y-2">
                   <div className="flex justify-between">
                     <span>Unit Price:</span>
-                    <span>₹{selectedProduct.selling_price}</span>
+                    <span>₹{salePrice || selectedProduct.selling_price}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Quantity:</span>
@@ -941,11 +975,11 @@ function QuickSale({ onNavigate }) {
                   </div>
                   <div className="flex justify-between font-semibold text-lg border-t pt-2">
                     <span>Total:</span>
-                    <span>₹{(selectedProduct.selling_price * quantity).toFixed(2)}</span>
+                    <span>₹{((salePrice || selectedProduct.selling_price) * quantity).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between text-secondary-600">
                     <span>Profit:</span>
-                    <span>₹{((selectedProduct.selling_price - selectedProduct.purchase_price) * quantity).toFixed(2)}</span>
+                    <span>₹{(((salePrice || selectedProduct.selling_price) - selectedProduct.purchase_price) * quantity).toFixed(2)}</span>
                   </div>
                 </div>
               </div>
