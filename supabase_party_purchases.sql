@@ -17,9 +17,9 @@ CREATE TABLE IF NOT EXISTS party_purchases (
 -- Create RLS policies for party_purchases
 ALTER TABLE party_purchases ENABLE ROW LEVEL SECURITY;
 
--- Policy to allow all operations for authenticated users
-CREATE POLICY "Allow all operations for authenticated users" ON party_purchases
-    FOR ALL USING (auth.role() = 'authenticated');
+-- Policy to allow all operations for authenticated and anonymous users
+CREATE POLICY "Allow all operations for all users" ON party_purchases
+    FOR ALL USING (true);
 
 -- Create updated_at trigger
 CREATE OR REPLACE FUNCTION update_updated_at_column()
