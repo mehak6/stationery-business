@@ -25,9 +25,6 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell
 } from 'recharts';
 
 // Import Supabase functions
@@ -68,7 +65,6 @@ function Dashboard({ onNavigate }) {
   const [lowStockItems, setLowStockItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [chartData, setChartData] = useState([]);
-  const [categoryData, setCategoryData] = useState([]);
 
   // Fetch dashboard data on component mount
   useEffect(() => {
@@ -119,9 +115,6 @@ function Dashboard({ onNavigate }) {
         }
         setChartData(last7Days);
 
-        // Simplified product count for pie chart
-        const totalProducts = (productsData || []).length;
-        setCategoryData([{ name: 'All Products', value: totalProducts }]);
         
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
@@ -344,33 +337,6 @@ function Dashboard({ onNavigate }) {
           </div>
         </div>
 
-        {/* Category Distribution */}
-        <div className="card">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Inventory by Category</h3>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={categoryData}
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={80}
-                  fill="#8884d8"
-                  dataKey="value"
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                >
-                  {categoryData.map((entry, index) => (
-                    <Cell 
-                      key={`cell-${index}`} 
-                      fill={['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'][index % 5]}
-                    />
-                  ))}
-                </Pie>
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
       </div>
     </div>
   );
