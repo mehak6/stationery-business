@@ -114,6 +114,15 @@
     @apply bg-primary-100 text-primary-700 font-medium;
   }
 
+  /* Mobile navigation styles */
+  .mobile-nav-link {
+    @apply flex items-center w-full px-3 py-3 text-gray-700 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-colors duration-200 font-medium text-base touch-target;
+  }
+
+  .mobile-nav-link-active {
+    @apply bg-primary-100 text-primary-700;
+  }
+
   /* Form styles */
   .form-group {
     @apply space-y-2;
@@ -166,6 +175,30 @@
     .input-field {
       @apply py-3;
     }
+
+    /* Modal improvements */
+    .card {
+      @apply p-4;
+    }
+
+    /* Ensure cards are properly spaced on mobile */
+    .mobile-card-spacing {
+      @apply space-y-3;
+    }
+
+    /* Better text truncation on mobile */
+    .mobile-truncate {
+      @apply truncate max-w-[180px];
+    }
+  }
+
+  /* Additional mobile-specific utilities */
+  .mobile-safe-bottom {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+
+  .mobile-container {
+    @apply px-4 sm:px-6 max-w-full;
   }
 }
 

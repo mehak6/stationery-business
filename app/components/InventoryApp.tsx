@@ -13,7 +13,10 @@ import {
   X,
   Check,
   Users,
-  Upload
+  Upload,
+  Menu,
+  ArrowLeft,
+  Home
 } from 'lucide-react';
 import {
   LineChart,
@@ -389,11 +392,11 @@ function ProductManagement({ onNavigate }) {
   };
 
   return (
-    <div className="p-6 bg-primary-50 min-h-screen">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
+    <div className="p-4 sm:p-6 bg-primary-50 min-h-screen">
+      {/* Header - Hidden on mobile since it's in nav */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 hidden md:flex">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Products</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Products</h1>
           <p className="text-gray-600 mt-2">Manage your inventory items</p>
         </div>
         <button 
@@ -421,7 +424,7 @@ function ProductManagement({ onNavigate }) {
 
       {/* Products Grid */}
       {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           {[...Array(6)].map((_, i) => (
             <div key={i} className="card">
               <div className="skeleton-card mb-4"></div>
@@ -436,7 +439,7 @@ function ProductManagement({ onNavigate }) {
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           {filteredProducts.map(product => (
           <div key={product.id} className="card hover:shadow-md transition-shadow">
             <div className="flex items-center justify-end mb-4">
@@ -484,6 +487,17 @@ function ProductManagement({ onNavigate }) {
         ))}
         </div>
       )}
+
+      {/* Floating Add Button - Mobile Only */}
+      <div className="md:hidden fixed bottom-4 right-4 z-30">
+        <button 
+          onClick={() => setShowAddForm(true)}
+          className="btn-primary rounded-full p-4 shadow-lg hover:shadow-xl transition-shadow touch-target"
+          title="Add Product"
+        >
+          <Plus className="h-6 w-6" />
+        </button>
+      </div>
 
       {/* Add Product Modal */}
       {showAddForm && (
@@ -540,8 +554,8 @@ function AddProductModal({ onClose, onProductAdded }) {
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6">
+      <div className="bg-white rounded-xl max-w-md w-full max-h-[90vh] overflow-y-auto mx-4">
+        <div className="p-4 sm:p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-xl font-bold text-gray-900">Add New Product</h2>
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
@@ -819,21 +833,22 @@ function QuickSale({ onNavigate }) {
                 onClick={() => {
                   setSelectedProduct(product);
                   setSalePrice(product.selling_price);
+                  setShowProductList(false);
                 }}
-                className={`p-4 border rounded-lg cursor-pointer transition-colors ${
+                className={`p-3 sm:p-4 border rounded-lg cursor-pointer transition-colors touch-target ${
                   selectedProduct?.id === product.id
                     ? 'border-primary-500 bg-primary-50'
                     : 'border-gray-200 hover:border-primary-300'
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="font-medium text-gray-900">{product.name}</h4>
-                    <p className="text-sm text-gray-500">{product.barcode}</p>
+                  <div className="min-w-0 flex-1">
+                    <h4 className="font-medium text-gray-900 text-sm sm:text-base truncate">{product.name}</h4>
+                    <p className="text-xs sm:text-sm text-gray-500 truncate">{product.barcode}</p>
                     <p className="text-sm font-medium text-secondary-600">₹{product.selling_price}</p>
                   </div>
-                  <div className="text-right">
-                    <p className={`text-sm ${product.stock_quantity <= product.min_stock_level ? 'text-danger-600' : 'text-gray-600'}`}>
+                  <div className="text-right flex-shrink-0 ml-2">
+                    <p className={`text-xs sm:text-sm ${product.stock_quantity <= product.min_stock_level ? 'text-danger-600' : 'text-gray-600'}`}>
                       {product.stock_quantity} in stock
                     </p>
                   </div>
@@ -1105,11 +1120,11 @@ function PartyManagement({ onNavigate }) {
   };
 
   return (
-    <div className="p-6 bg-primary-50 min-h-screen">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
+    <div className="p-4 sm:p-6 bg-primary-50 min-h-screen">
+      {/* Header - Hidden on mobile since it's in nav */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 hidden md:flex">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Party Purchases</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Party Purchases</h1>
           <p className="text-gray-600 mt-2">Manage your purchased inventory from suppliers</p>
         </div>
         <div className="flex gap-3 mt-4 sm:mt-0">
@@ -1146,7 +1161,7 @@ function PartyManagement({ onNavigate }) {
 
       {/* Purchases Grid */}
       {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           {[...Array(6)].map((_, i) => (
             <div key={i} className="card">
               <div className="skeleton-title mb-2"></div>
@@ -1156,7 +1171,7 @@ function PartyManagement({ onNavigate }) {
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           {filteredPurchases.map(purchase => (
             <div key={purchase.id} className="card hover:shadow-md transition-shadow">
               <div className="flex items-center justify-between mb-4">
@@ -1250,6 +1265,24 @@ function PartyManagement({ onNavigate }) {
           }}
         />
       )}
+
+      {/* Floating Action Buttons - Mobile Only */}
+      <div className="md:hidden fixed bottom-4 right-4 flex flex-col gap-2 z-30">
+        <button 
+          onClick={() => setShowUploadModal(true)}
+          className="btn-outline rounded-full p-3 shadow-lg hover:shadow-xl transition-shadow touch-target bg-white"
+          title="Upload File"
+        >
+          <Upload className="h-5 w-5" />
+        </button>
+        <button 
+          onClick={() => setShowAddForm(true)}
+          className="btn-primary rounded-full p-4 shadow-lg hover:shadow-xl transition-shadow touch-target"
+          title="Add Purchase"
+        >
+          <Plus className="h-6 w-6" />
+        </button>
+      </div>
 
       {/* File Upload Modal */}
       {showUploadModal && (
@@ -1886,9 +1919,60 @@ function FileUploadModal({ onClose, onFileProcessed }) {
 // Main App Component
 function InventoryApp() {
   const [currentView, setCurrentView] = useState('dashboard');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [viewHistory, setViewHistory] = useState(['dashboard']);
 
   const handleNavigate = (view) => {
-    setCurrentView(view);
+    // Prevent duplicate entries in history
+    if (view !== currentView) {
+      setViewHistory(prev => [...prev, view]);
+      setCurrentView(view);
+      setMobileMenuOpen(false);
+    }
+  };
+
+  const handleBack = () => {
+    if (viewHistory.length > 1) {
+      const newHistory = [...viewHistory];
+      newHistory.pop(); // Remove current view
+      const previousView = newHistory[newHistory.length - 1];
+      setViewHistory(newHistory);
+      setCurrentView(previousView);
+    } else {
+      // If no history, go to dashboard
+      setCurrentView('dashboard');
+      setViewHistory(['dashboard']);
+    }
+  };
+
+  // Handle browser back button
+  useEffect(() => {
+    const handlePopState = (event) => {
+      event.preventDefault();
+      handleBack();
+    };
+
+    // Add browser history entry
+    if (typeof window !== 'undefined') {
+      window.history.pushState({ view: currentView }, '', `#${currentView}`);
+      window.addEventListener('popstate', handlePopState);
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('popstate', handlePopState);
+      }
+    };
+  }, [currentView]);
+
+  const getViewTitle = (view) => {
+    switch (view) {
+      case 'dashboard': return 'Dashboard';
+      case 'products': return 'Products';
+      case 'quick-sale': return 'Quick Sale';
+      case 'party': return 'Party Purchases';
+      default: return 'Dashboard';
+    }
   };
 
   const renderCurrentView = () => {
@@ -1909,45 +1993,121 @@ function InventoryApp() {
   return (
     <div className="min-h-screen bg-primary-50">
       {/* Navigation */}
-      <nav className="bg-white shadow-sm border-b">
+      <nav className="bg-white shadow-sm border-b sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
             <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <h1 className="text-xl font-bold text-primary-600">Inventory Pro</h1>
+              {/* Mobile Back Button */}
+              <div className="flex md:hidden mr-3">
+                {currentView !== 'dashboard' ? (
+                  <button
+                    onClick={handleBack}
+                    className="p-2 rounded-md text-gray-600 hover:text-primary-600 hover:bg-primary-50 touch-target"
+                    aria-label="Go back"
+                  >
+                    <ArrowLeft className="h-5 w-5" />
+                  </button>
+                ) : null}
               </div>
+              
+              <div className="flex-shrink-0">
+                <button
+                  onClick={() => handleNavigate('dashboard')}
+                  className="text-xl font-bold text-primary-600 hover:text-primary-700"
+                >
+                  Inventory Pro
+                </button>
+              </div>
+              
+              {/* Desktop Navigation */}
               <div className="hidden md:block">
                 <div className="ml-10 flex items-baseline space-x-4">
                   <button
-                    onClick={() => setCurrentView('dashboard')}
+                    onClick={() => handleNavigate('dashboard')}
                     className={`nav-link ${currentView === 'dashboard' ? 'nav-link-active' : ''}`}
                   >
+                    <Home className="h-4 w-4 mr-2" />
                     Dashboard
                   </button>
                   <button
-                    onClick={() => setCurrentView('products')}
+                    onClick={() => handleNavigate('products')}
                     className={`nav-link ${currentView === 'products' ? 'nav-link-active' : ''}`}
                   >
+                    <Package className="h-4 w-4 mr-2" />
                     Products
                   </button>
                   <button
-                    onClick={() => setCurrentView('quick-sale')}
+                    onClick={() => handleNavigate('quick-sale')}
                     className={`nav-link ${currentView === 'quick-sale' ? 'nav-link-active' : ''}`}
                   >
+                    <ShoppingCart className="h-4 w-4 mr-2" />
                     Quick Sale
                   </button>
                   <button
-                    onClick={() => setCurrentView('party')}
+                    onClick={() => handleNavigate('party')}
                     className={`nav-link ${currentView === 'party' ? 'nav-link-active' : ''}`}
                   >
+                    <Users className="h-4 w-4 mr-2" />
                     Party
                   </button>
                 </div>
               </div>
             </div>
+            
+            {/* Mobile Menu Button */}
+            <div className="flex md:hidden">
+              <button
+                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                className="p-2 rounded-md text-gray-600 hover:text-primary-600 hover:bg-primary-50 touch-target"
+                aria-label="Open menu"
+              >
+                <Menu className="h-5 w-5" />
+              </button>
+            </div>
           </div>
         </div>
+        
+        {/* Mobile Menu */}
+        {mobileMenuOpen && (
+          <div className="md:hidden bg-white border-t border-gray-200 shadow-lg">
+            <div className="px-2 pt-2 pb-3 space-y-1">
+              <button
+                onClick={() => handleNavigate('dashboard')}
+                className={`mobile-nav-link ${currentView === 'dashboard' ? 'mobile-nav-link-active' : ''}`}
+              >
+                <Home className="h-5 w-5 mr-3" />
+                Dashboard
+              </button>
+              <button
+                onClick={() => handleNavigate('products')}
+                className={`mobile-nav-link ${currentView === 'products' ? 'mobile-nav-link-active' : ''}`}
+              >
+                <Package className="h-5 w-5 mr-3" />
+                Products
+              </button>
+              <button
+                onClick={() => handleNavigate('quick-sale')}
+                className={`mobile-nav-link ${currentView === 'quick-sale' ? 'mobile-nav-link-active' : ''}`}
+              >
+                <ShoppingCart className="h-5 w-5 mr-3" />
+                Quick Sale
+              </button>
+              <button
+                onClick={() => handleNavigate('party')}
+                className={`mobile-nav-link ${currentView === 'party' ? 'mobile-nav-link-active' : ''}`}
+              >
+                <Users className="h-5 w-5 mr-3" />
+                Party Purchases
+              </button>
+            </div>
+          </div>
+        )}
       </nav>
+      
+      {/* Mobile Page Title */}
+      <div className="md:hidden bg-white border-b border-gray-200 px-4 py-3">
+        <h1 className="text-lg font-semibold text-gray-900">{getViewTitle(currentView)}</h1>
+      </div>
 
       {/* Main Content */}
       <main>
