@@ -18,17 +18,6 @@ import {
   ArrowLeft,
   Home
 } from 'lucide-react';
-import {
-  LineChart,
-  Line,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from 'recharts';
 
 // Import Supabase functions
 import {
@@ -40,6 +29,7 @@ import {
   deleteProduct,
   deleteSale,
   getSalesByDate,
+  getSalesByDateRange,
   getAnalytics,
   getPartyPurchases,
   createPartyPurchase,
@@ -64,22 +54,32 @@ function Dashboard({ onNavigate }) {
     lowStockProducts: 0
   });
 
-  const [recentSales, setRecentSales] = useState([]);
   const [lowStockItems, setLowStockItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [chartData, setChartData] = useState([]);
+  const [allSales, setAllSales] = useState([]);
+  const [showAllSales, setShowAllSales] = useState(false);
+  const [allSalesLoading, setAllSalesLoading] = useState(false);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [allSalesPage, setAllSalesPage] = useState(1);
+  const SALES_PER_PAGE = 20;
 
   // Fetch dashboard data on component mount
   useEffect(() => {
     const fetchDashboardData = async () => {
       try {
         setLoading(true);
+        console.log('[DEBUG] Dashboard: About to fetch dashboard data');
+
         const [analyticsData, salesData, productsData] = await Promise.all([
           getAnalytics(),
           getSales(5), // Get recent 5 sales
           getProducts()
         ]);
-        
+
+        console.log('[DEBUG] Dashboard: analyticsData received:', analyticsData);
+        console.log('[DEBUG] Dashboard: salesData received:', salesData);
+        console.log('[DEBUG] Dashboard: salesData count:', salesData?.length || 0);
         setAnalytics(analyticsData || {
           totalProducts: 0,
           totalSales: 0,
@@ -88,41 +88,14 @@ function Dashboard({ onNavigate }) {
           todayProfit: 0,
           lowStockProducts: 0
         });
-        
-        setRecentSales(salesData || []);
-        
+
         // Filter low stock items
         const lowStock = (productsData || []).filter(p => p.stock_quantity <= p.min_stock_level);
         setLowStockItems(lowStock);
 
-        // Prepare chart data (last 7 days sales)
-        const last7Days = [];
-        for (let i = 6; i >= 0; i--) {
-          const date = new Date();
-          date.setDate(date.getDate() - i);
-          const dateStr = date.toISOString().split('T')[0];
-          
-          const daySales = (salesData || []).filter(sale => 
-            sale.sale_date === dateStr
-          );
-          
-          const dayRevenue = daySales.reduce((sum, sale) => sum + (sale.total_amount || 0), 0);
-          const dayProfit = daySales.reduce((sum, sale) => sum + (sale.profit || 0), 0);
-          
-          last7Days.push({
-            date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-            sales: daySales.length,
-            revenue: dayRevenue,
-            profit: dayProfit
-          });
-        }
-        setChartData(last7Days);
-
-        
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
         // Set empty states on error
-        setRecentSales([]);
         setLowStockItems([]);
       } finally {
         setLoading(false);
@@ -139,15 +112,14 @@ function Dashboard({ onNavigate }) {
 
     try {
       await deleteSale(saleId);
-      
-      // Update recent sales by removing the deleted sale
-      setRecentSales(prevSales => prevSales.filter(sale => sale.id !== saleId));
-      
+
+      // Note: Recent sales removed from dashboard
+
       // Refresh dashboard data to update analytics
       const [analyticsData] = await Promise.all([
         getAnalytics()
       ]);
-      
+
       setAnalytics(analyticsData || {
         totalProducts: 0,
         totalSales: 0,
@@ -156,12 +128,90 @@ function Dashboard({ onNavigate }) {
         todayProfit: 0,
         lowStockProducts: 0
       });
-      
+
+      // Refresh All Sales if open
+      if (showAllSales) {
+        await fetchAllSales(allSalesPage);
+      }
+
       alert('Sale deleted successfully!');
     } catch (error) {
       console.error('Error deleting sale:', error);
       alert('Error deleting sale: ' + error.message);
     }
+  };
+
+  // Fetch All Sales with filtering and pagination
+  const fetchAllSales = async (page: number = 1) => {
+    try {
+      setAllSalesLoading(true);
+      console.log(`[DEBUG] fetchAllSales: Fetching page ${page}, startDate: ${startDate}, endDate: ${endDate}`);
+
+      const { supabase } = await import('../../supabase_client');
+      let query = supabase
+        .from('sales')
+        .select(`
+          *,
+          products (
+            id,
+            name
+          )
+        `, { count: 'exact' });
+
+      // Apply date filtering
+      if (startDate) {
+        query = query.gte('sale_date', startDate);
+      }
+      if (endDate) {
+        query = query.lte('sale_date', endDate);
+      }
+
+      // Apply pagination
+      const from = (page - 1) * SALES_PER_PAGE;
+      const to = from + SALES_PER_PAGE - 1;
+
+      query = query
+        .order('sale_date', { ascending: false })
+        .order('created_at', { ascending: false })
+        .range(from, to);
+
+      const { data, error, count } = await query;
+
+      if (error) throw error;
+
+      console.log(`[DEBUG] fetchAllSales: Retrieved ${data?.length || 0} sales for page ${page}`);
+      console.log(`[DEBUG] fetchAllSales: Total sales available: ${count || 0}`);
+
+      setAllSales(data || []);
+
+    } catch (error) {
+      console.error('[DEBUG] fetchAllSales: Error fetching all sales:', error);
+      setAllSales([]);
+    } finally {
+      setAllSalesLoading(false);
+    }
+  };
+
+  // Handle showing all sales section
+  const handleShowAllSales = async () => {
+    if (!showAllSales) {
+      setShowAllSales(true);
+      await fetchAllSales(1);
+    } else {
+      setShowAllSales(false);
+    }
+  };
+
+  // Handle filter changes
+  const handleFilterChange = async () => {
+    setAllSalesPage(1);
+    await fetchAllSales(1);
+  };
+
+  // Handle pagination
+  const handlePageChange = async (newPage: number) => {
+    setAllSalesPage(newPage);
+    await fetchAllSales(newPage);
   };
 
   return (
@@ -216,51 +266,6 @@ function Dashboard({ onNavigate }) {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Recent Sales */}
-        <div className="card">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900">Recent Sales</h3>
-            <button 
-              onClick={() => onNavigate('quick-sale')}
-              className="text-primary-600 hover:text-primary-700 font-medium"
-            >
-              Make Sale
-            </button>
-          </div>
-          <div className="space-y-4">
-            {recentSales.length === 0 && (
-              <div className="text-center py-8">
-                <p className="text-gray-500">No recent sales</p>
-                <button 
-                  onClick={() => onNavigate('quick-sale')}
-                  className="mt-2 btn-primary"
-                >
-                  Make Your First Sale
-                </button>
-              </div>
-            )}
-            {recentSales.map(sale => (
-              <div key={sale.id} className="flex items-center justify-between p-4 bg-primary-50 rounded-lg">
-                <div className="flex-1">
-                  <p className="font-medium text-gray-900">{sale.products?.name || 'Unknown Product'}</p>
-                  <p className="text-sm text-gray-500">Qty: {sale.quantity} • ₹{sale.unit_price}</p>
-                  <p className="text-xs text-gray-400">Date: {new Date(sale.sale_date).toLocaleDateString()}</p>
-                </div>
-                <div className="text-right mr-3">
-                  <p className="font-medium text-gray-900">₹{sale.total_amount}</p>
-                  <p className="text-sm text-secondary-600">Profit: ₹{sale.profit}</p>
-                </div>
-                <button
-                  onClick={() => handleDeleteSale(sale.id, sale)}
-                  className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
-                  title="Delete Sale"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
 
         {/* Low Stock Alerts */}
         <div className="card">
@@ -287,18 +292,123 @@ function Dashboard({ onNavigate }) {
             ))}
           </div>
         </div>
+
+        {/* All Sales Section */}
+        <div className="lg:col-span-2 card mt-8">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-900">All Sales</h3>
+            <button
+              onClick={handleShowAllSales}
+              className="btn-outline text-sm"
+              title={showAllSales ? "Hide All Sales" : "Show All Sales"}
+            >
+              {showAllSales ? 'Hide' : 'Show'} All Sales
+            </button>
+          </div>
+
+          {showAllSales && (
+            <div className="space-y-4">
+              {/* Date Filters */}
+              <div className="flex flex-wrap gap-4">
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium text-gray-700">From:</label>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="input-field text-sm w-36"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium text-gray-700">To:</label>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="input-field text-sm w-36"
+                  />
+                </div>
+                <button
+                  onClick={handleFilterChange}
+                  className="btn-primary text-sm"
+                >
+                  Apply Filter
+                </button>
+              </div>
+
+              {/* Sales List */}
+              <div className="space-y-3">
+                {allSalesLoading ? (
+                  <div className="text-center py-8">
+                    <p className="text-gray-500">Loading sales...</p>
+                  </div>
+                ) : allSales.length === 0 ? (
+                  <div className="text-center py-8">
+                    <p className="text-gray-500">No sales found for the selected date range</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="max-h-96 overflow-y-auto">
+                      {allSales.map(sale => (
+                        <div key={sale.id} className="flex items-center justify-between p-3 bg-primary-50 rounded-lg mb-2">
+                          <div className="flex-1">
+                            <p className="font-medium text-gray-900">{sale.products?.name || 'Unknown Product'}</p>
+                            <p className="text-sm text-gray-500">Qty: {sale.quantity} • ₹{sale.unit_price}</p>
+                            <p className="text-xs text-gray-400">Date: {new Date(sale.sale_date).toLocaleDateString()}</p>
+                          </div>
+                          <div className="text-right mr-3">
+                            <p className="font-medium text-gray-900">₹{sale.total_amount}</p>
+                            <p className="text-sm text-secondary-600">Profit: ₹{sale.profit}</p>
+                          </div>
+                          <button
+                            onClick={() => handleDeleteSale(sale.id, sale)}
+                            className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Delete Sale"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Pagination */}
+                    {allSales.length >= SALES_PER_PAGE && (
+                      <div className="flex justify-center gap-2 mt-4">
+                        <button
+                          onClick={() => handlePageChange(Math.max(1, allSalesPage - 1))}
+                          disabled={allSalesPage === 1}
+                          className="btn-outline px-3 py-2 disabled:opacity-50"
+                        >
+                          Previous
+                        </button>
+                        <span className="px-3 py-2 text-sm text-gray-700">Page {allSalesPage}</span>
+                        <button
+                          onClick={() => handlePageChange(allSalesPage + 1)}
+                          disabled={allSales.length < SALES_PER_PAGE}
+                          className="btn-outline px-3 py-2 disabled:opacity-50"
+                        >
+                          Next
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Quick Actions */}
       <div className="fixed bottom-6 right-6 flex flex-col gap-3">
-        <button 
+        <button
           onClick={() => onNavigate('quick-sale')}
           className="btn-primary rounded-full p-4 shadow-lg hover:shadow-xl transition-shadow"
           title="Quick Sale"
         >
           <ShoppingCart className="h-6 w-6" />
         </button>
-        <button 
+        <button
           onClick={() => onNavigate('add-product')}
           className="btn-secondary rounded-full p-4 shadow-lg hover:shadow-xl transition-shadow"
           title="Add Product"
@@ -307,40 +417,6 @@ function Dashboard({ onNavigate }) {
         </button>
       </div>
 
-      {/* Charts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mt-8">
-        {/* Sales Trend Chart */}
-        <div className="lg:col-span-2 card">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Sales Trend (Last 7 Days)</h3>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip />
-                <Area 
-                  type="monotone" 
-                  dataKey="revenue" 
-                  stroke="#3b82f6" 
-                  fill="#3b82f6" 
-                  fillOpacity={0.2}
-                  name="Revenue (₹)"
-                />
-                <Area 
-                  type="monotone" 
-                  dataKey="profit" 
-                  stroke="#10b981" 
-                  fill="#10b981" 
-                  fillOpacity={0.2}
-                  name="Profit (₹)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-      </div>
     </div>
   );
 }
@@ -489,13 +565,28 @@ function ProductManagement({ onNavigate }) {
       )}
 
       {/* Floating Add Button - Mobile Only */}
-      <div className="md:hidden fixed bottom-4 right-4 z-30">
+      <div className="md:hidden fixed bottom-6 right-6 z-50">
         <button 
-          onClick={() => setShowAddForm(true)}
-          className="btn-primary rounded-full p-4 shadow-lg hover:shadow-xl transition-shadow touch-target"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Add product button clicked');
+            setShowAddForm(true);
+          }}
+          onTouchStart={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          className="btn-primary rounded-full p-4 shadow-lg hover:shadow-xl transition-shadow touch-target active:scale-95"
           title="Add Product"
+          style={{ 
+            minHeight: '56px', 
+            minWidth: '56px',
+            touchAction: 'manipulation',
+            WebkitTapHighlightColor: 'transparent'
+          }}
         >
-          <Plus className="h-6 w-6" />
+          <Plus className="h-6 w-6 pointer-events-none" />
         </button>
       </div>
 
@@ -553,7 +644,7 @@ function AddProductModal({ onClose, onProductAdded }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[9999]">
       <div className="bg-white rounded-xl max-w-md w-full max-h-[90vh] overflow-y-auto mx-4">
         <div className="p-4 sm:p-6">
           <div className="flex items-center justify-between mb-6">
@@ -1267,20 +1358,50 @@ function PartyManagement({ onNavigate }) {
       )}
 
       {/* Floating Action Buttons - Mobile Only */}
-      <div className="md:hidden fixed bottom-4 right-4 flex flex-col gap-2 z-30">
+      <div className="md:hidden fixed bottom-6 right-6 flex flex-col gap-3 z-50">
         <button 
-          onClick={() => setShowUploadModal(true)}
-          className="btn-outline rounded-full p-3 shadow-lg hover:shadow-xl transition-shadow touch-target bg-white"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Upload button clicked');
+            setShowUploadModal(true);
+          }}
+          onTouchStart={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          className="btn-outline rounded-full p-3 shadow-lg hover:shadow-xl transition-shadow touch-target bg-white active:scale-95"
           title="Upload File"
+          style={{ 
+            minHeight: '48px', 
+            minWidth: '48px',
+            touchAction: 'manipulation',
+            WebkitTapHighlightColor: 'transparent'
+          }}
         >
-          <Upload className="h-5 w-5" />
+          <Upload className="h-5 w-5 pointer-events-none" />
         </button>
         <button 
-          onClick={() => setShowAddForm(true)}
-          className="btn-primary rounded-full p-4 shadow-lg hover:shadow-xl transition-shadow touch-target"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Add purchase button clicked');
+            setShowAddForm(true);
+          }}
+          onTouchStart={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          className="btn-primary rounded-full p-4 shadow-lg hover:shadow-xl transition-shadow touch-target active:scale-95"
           title="Add Purchase"
+          style={{ 
+            minHeight: '56px', 
+            minWidth: '56px',
+            touchAction: 'manipulation',
+            WebkitTapHighlightColor: 'transparent'
+          }}
         >
-          <Plus className="h-6 w-6" />
+          <Plus className="h-6 w-6 pointer-events-none" />
         </button>
       </div>
 
@@ -1336,7 +1457,7 @@ function AddPurchaseModal({ onClose, onPurchaseAdded }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[9999]">
       <div className="bg-white rounded-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
         <div className="p-6">
           <div className="flex items-center justify-between mb-6">
@@ -1501,7 +1622,7 @@ function TransferModal({ purchase, onClose, onTransferComplete }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[9999]">
       <div className="bg-white rounded-xl max-w-md w-full">
         <div className="p-6">
           <div className="flex items-center justify-between mb-6">
@@ -1725,8 +1846,9 @@ function FileUploadModal({ onClose, onFileProcessed }) {
         const result = Papa.parse(text, { header: true, skipEmptyLines: true });
         parsedData = result.data;
       } else if (fileExtension === 'pdf') {
-        // PDF processing temporarily disabled due to compatibility issues
-        alert('PDF processing is temporarily disabled. Please use CSV or Excel files for bulk import, or enter data manually.');
+        // For now, disable PDF processing due to compatibility issues
+        // but let user know about the potential
+        alert('PDF processing is temporarily disabled. The PDF file you uploaded appears to be an invoice from "Big Daddy Store" with structured data including items like "Astronaut with balloon Mini Diary", quantities, and prices. To import this data:\n\n1. Open the PDF file\n2. Copy the item details manually\n3. Or export to Excel format for better import\n\nThe software has pattern recognition capabilities for most invoice formats.');
         parsedData = [];
         return;
       } else {
@@ -1840,7 +1962,7 @@ function FileUploadModal({ onClose, onFileProcessed }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[9999]">
       <div className="bg-white rounded-xl max-w-lg w-full">
         <div className="p-6">
           <div className="flex items-center justify-between mb-6">

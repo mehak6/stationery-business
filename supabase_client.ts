@@ -167,6 +167,25 @@ export const getSalesByDate = async (date: string) => {
   return data
 }
 
+export const getSalesByDateRange = async (startDate: string, endDate: string) => {
+  const { data, error } = await supabase
+    .from('sales')
+    .select(`
+      *,
+      products (
+        id,
+        name
+      )
+    `)
+    .gte('sale_date', startDate)
+    .lte('sale_date', endDate)
+    .order('sale_date', { ascending: false })
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data
+}
+
 // Categories
 export const getCategories = async () => {
   const { data, error } = await supabase
