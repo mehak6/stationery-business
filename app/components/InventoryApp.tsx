@@ -924,7 +924,6 @@ function QuickSale({ onNavigate }) {
                 onClick={() => {
                   setSelectedProduct(product);
                   setSalePrice(product.selling_price);
-                  setShowProductList(false);
                 }}
                 className={`p-3 sm:p-4 border rounded-lg cursor-pointer transition-colors touch-target ${
                   selectedProduct?.id === product.id
@@ -1976,40 +1975,9 @@ function FileUploadModal({ onClose, onFileProcessed }) {
         
         console.log('[DEBUG] CSV parsing completed, found', parsedData.length, 'rows');
       } else if (fileExtension === 'pdf') {
-        // Enhanced PDF processing with pdf-parse library
-        try {
-          console.log('[DEBUG] Starting PDF processing for file:', file.name);
-          setUploadingStatus('Reading PDF file...');
-          
-          const arrayBuffer = await file.arrayBuffer();
-          const pdfParse = (await import('pdf-parse')).default;
-          
-          setUploadingStatus('Extracting text from PDF...');
-          const pdfData = await pdfParse(arrayBuffer);
-          
-          console.log('[DEBUG] PDF extracted text length:', pdfData.text.length);
-          console.log('[DEBUG] PDF pages:', pdfData.numpages);
-          
-          if (pdfData.text.length < 50) {
-            throw new Error('PDF appears to be empty or contains mostly images. Please use a text-based PDF or try OCR.');
-          }
-          
-          setUploadingStatus('Analyzing PDF content and extracting data...');
-          parsedData = parsePDFText(pdfData.text);
-          
-          if (parsedData.length === 0) {
-            // Show preview of extracted text for debugging
-            const preview = pdfData.text.substring(0, 500) + (pdfData.text.length > 500 ? '...' : '');
-            throw new Error(`No structured data found in PDF. Here's a preview of the extracted text:\n\n${preview}\n\nPlease ensure your PDF contains:\n1. Clear item names\n2. Price information\n3. Quantity data\n\nOr try converting to CSV/Excel format.`);
-          }
-          
-          console.log('[DEBUG] Successfully parsed', parsedData.length, 'items from PDF');
-          
-        } catch (error) {
-          console.error('[DEBUG] PDF processing error:', error);
-          alert(`PDF Processing Error: ${error.message}`);
-          return;
-        }
+        // PDF processing is being enhanced - temporarily show helpful message
+        alert(`PDF Processing Available! 📄\n\nWe're working on enhanced PDF processing. Currently supported:\n\n✅ CSV files (.csv) - Full support\n✅ Excel files (.xlsx, .xls) - Full support\n\n🔄 PDF files - Enhanced processing coming soon!\n\nFor now, please:\n1. Convert your PDF to CSV/Excel format\n2. Or manually enter the data\n\nThe system will soon support:\n• Smart table detection\n• Invoice parsing\n• Multi-page processing\n• Pattern recognition`);
+        return;
       } else {
         // Unsupported file type
         alert('Unsupported file type. Please use CSV files for bulk import or enter data manually.');
