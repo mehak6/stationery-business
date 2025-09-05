@@ -615,6 +615,24 @@ function AddProductModal({ onClose, onProductAdded }) {
     min_stock_level: '5',
     description: ''
   });
+  
+  // Handle ESC key to close modal
+  useEffect(() => {
+    const handleEscapeKey = (event) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+    
+    document.addEventListener('keydown', handleEscapeKey);
+    return () => document.removeEventListener('keydown', handleEscapeKey);
+  }, [onClose]);
+  
+  // Prevent body scroll
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = 'unset'; };
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -644,8 +662,11 @@ function AddProductModal({ onClose, onProductAdded }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[9999]">
-      <div className="bg-white rounded-xl max-w-md w-full max-h-[90vh] overflow-y-auto mx-4">
+    <div 
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[9999] overflow-y-auto"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="bg-white rounded-xl max-w-md w-full max-h-[90vh] overflow-y-auto mx-4 my-8">
         <div className="p-4 sm:p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-xl font-bold text-gray-900">Add New Product</h2>
@@ -1430,6 +1451,24 @@ function AddPurchaseModal({ onClose, onPurchaseAdded }) {
     purchase_date: new Date().toISOString().split('T')[0],
     notes: ''
   });
+  
+  // Handle ESC key to close modal
+  useEffect(() => {
+    const handleEscapeKey = (event) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+    
+    document.addEventListener('keydown', handleEscapeKey);
+    return () => document.removeEventListener('keydown', handleEscapeKey);
+  }, [onClose]);
+  
+  // Prevent body scroll
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = 'unset'; };
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -1456,8 +1495,11 @@ function AddPurchaseModal({ onClose, onPurchaseAdded }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[9999]">
-      <div className="bg-white rounded-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+    <div 
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[9999] overflow-y-auto"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="bg-white rounded-xl max-w-lg w-full max-h-[90vh] overflow-y-auto my-8">
         <div className="p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-xl font-bold text-gray-900">Add Purchase Record</h2>
@@ -1584,6 +1626,24 @@ function AddPurchaseModal({ onClose, onPurchaseAdded }) {
 // Transfer Modal Component
 function TransferModal({ purchase, onClose, onTransferComplete }) {
   const [transferQuantity, setTransferQuantity] = useState(1);
+  
+  // Handle ESC key to close modal
+  useEffect(() => {
+    const handleEscapeKey = (event) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+    
+    document.addEventListener('keydown', handleEscapeKey);
+    return () => document.removeEventListener('keydown', handleEscapeKey);
+  }, [onClose]);
+  
+  // Prevent body scroll
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = 'unset'; };
+  }, []);
 
   const handleTransfer = async () => {
     if (transferQuantity > purchase.remaining_quantity) {
@@ -1621,8 +1681,11 @@ function TransferModal({ purchase, onClose, onTransferComplete }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[9999]">
-      <div className="bg-white rounded-xl max-w-md w-full">
+    <div 
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[9999] overflow-y-auto"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="bg-white rounded-xl max-w-md w-full my-8">
         <div className="p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-xl font-bold text-gray-900">Transfer to Products</h2>
@@ -1941,6 +2004,32 @@ function FileUploadModal({ onClose, onFileProcessed }) {
     setUploadingStatus('');
     setProcessingProgress(0);
   }, []);
+  
+  // Handle ESC key to close modal
+  useEffect(() => {
+    const handleEscapeKey = (event) => {
+      if (event.key === 'Escape' && !uploading) {
+        onClose();
+      }
+    };
+    
+    // Add event listener
+    document.addEventListener('keydown', handleEscapeKey);
+    
+    // Cleanup
+    return () => {
+      document.removeEventListener('keydown', handleEscapeKey);
+    };
+  }, [onClose, uploading]);
+  
+  // Prevent body scroll when modal is open
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, []);
 
   const handleFileUpload = async (file) => {
     if (!file) return;
@@ -2102,12 +2191,27 @@ function FileUploadModal({ onClose, onFileProcessed }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[9999]">
-      <div className="bg-white rounded-xl max-w-lg w-full">
+    <div 
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[9999] overflow-y-auto"
+      onClick={(e) => {
+        // Close modal when clicking backdrop (but not when uploading)
+        if (e.target === e.currentTarget && !uploading) {
+          onClose();
+        }
+      }}
+    >
+      <div className="bg-white rounded-xl max-w-lg w-full my-8 max-h-[90vh] overflow-y-auto">
         <div className="p-6">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-xl font-bold text-gray-900">Upload Purchase File</h2>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <button 
+              onClick={onClose} 
+              disabled={uploading}
+              className={`text-gray-400 hover:text-gray-600 p-2 rounded-lg transition-colors ${
+                uploading ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100'
+              }`}
+              title={uploading ? 'Cannot close while uploading' : 'Close (Esc)'}
+            >
               <X className="h-6 w-6" />
             </button>
           </div>
@@ -2190,8 +2294,15 @@ function FileUploadModal({ onClose, onFileProcessed }) {
           </div>
 
           <div className="flex gap-3 mt-6">
-            <button onClick={onClose} className="btn-outline flex-1">
-              Cancel
+            <button 
+              onClick={onClose} 
+              disabled={uploading}
+              className={`btn-outline flex-1 ${
+                uploading ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
+              title={uploading ? 'Cannot cancel while uploading' : ''}
+            >
+              {uploading ? 'Processing...' : 'Cancel'}
             </button>
           </div>
         </div>
