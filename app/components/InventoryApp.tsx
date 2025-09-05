@@ -1998,27 +1998,32 @@ async function processPDFExtractedData(extractedData) {
   const parsedItems = [];
   const { fullText, pages } = extractedData;
   
-  // Enhanced patterns for various invoice formats
+  // Enhanced patterns focused on purchase documents (invoices, purchase orders)
   const patterns = {
-    // Supplier/Party patterns - more comprehensive
-    supplier: /(?:(?:from|supplier|vendor|party|sold\s*by|dealer|distributor|company|bill\s*to|ship\s*to)\s*:?\s*([A-Za-z0-9\s&\.,\-'\"]+))(?:\n|address|phone|email|\d{5,6})/gi,
+    // Supplier/Party patterns - comprehensive for purchase documents
+    supplier: /(?:(?:from|supplier|vendor|party|sold\s*by|dealer|distributor|company|bill\s*from|invoice\s*from)\s*:?\s*([A-Za-z0-9\s&\.,\-'\"]+))(?:\n|address|phone|email|\d{5,6})/gi,
     
-    // Item patterns with better context
-    itemName: /(?:(?:item|product|description|article|goods?|part)\s*(?:name|no\.?|#)?\s*:?\s*([A-Za-z0-9\s\.,\-\/()&'\"]+))(?=\s*(?:[₹$]|\d+|qty|quantity|price|rate))/gi,
+    // Item patterns optimized for purchase documents
+    itemName: /(?:(?:item|product|description|article|goods?|part|material)\s*(?:name|no\.?|#|code)?\s*:?\s*([A-Za-z0-9\s\.,\-\/()&'\"]+))(?=\s*(?:[₹$]|\d+|qty|quantity|rate|price|amount))/gi,
     
-    // Price patterns with multiple currencies and formats
-    pricePattern: /(?:[₹$]?\s*([0-9,]+(?:\.[0-9]{1,2})?)\s*(?:per|each|unit)?)/gi,
-    purchasePrice: /(?:(?:purchase|cost|buy|wholesale|cp|rate)\s*(?:price)?\s*:?\s*[₹$]?\s*([0-9,]+(?:\.[0-9]{1,2})?))/gi,
-    sellingPrice: /(?:(?:sell|sale|retail|selling|mrp|sp|market)\s*(?:price|rate)?\s*:?\s*[₹$]?\s*([0-9,]+(?:\.[0-9]{1,2})?))/gi,
+    // Purchase-focused price patterns (unit rates, costs, amounts)
+    unitPrice: /(?:(?:rate|unit\s*price|price|cost|amount)\s*:?\s*[₹$]?\s*([0-9,]+(?:\.[0-9]{1,2})?))/gi,
+    totalAmount: /(?:(?:total|amount|sum)\s*:?\s*[₹$]?\s*([0-9,]+(?:\.[0-9]{1,2})?))/gi,
     
-    // Quantity patterns
-    quantity: /(?:(?:qty|quantity|amount|units?|nos?|pieces?|pcs?)\s*:?\s*([0-9,]+))/gi,
+    // Purchase-specific pricing (avoid selling/MRP terms)
+    purchasePrice: /(?:(?:purchase|cost|buy|wholesale|cp|rate|unit\s*rate)\s*(?:price)?\s*:?\s*[₹$]?\s*([0-9,]+(?:\.[0-9]{1,2})?))/gi,
     
-    // Enhanced table detection
-    tableHeader: /(item|product|description|name|qty|quantity|rate|price|amount|total|code|barcode)/gi,
+    // Quantity patterns for purchase documents
+    quantity: /(?:(?:qty|quantity|units?|nos?|pieces?|pcs?|count)\s*:?\s*([0-9,]+))/gi,
     
-    // Date patterns
-    date: /(?:(?:date|dated|invoice\s*date|bill\s*date)\s*:?\s*([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4}|[0-9]{4}[\/\-][0-9]{1,2}[\/\-][0-9]{1,2}))/gi
+    // Table headers common in purchase documents
+    tableHeader: /(item|product|description|material|qty|quantity|rate|unit\s*price|price|amount|total|code|part\s*no)/gi,
+    
+    // Invoice/Purchase document date patterns
+    date: /(?:(?:date|dated|invoice\s*date|bill\s*date|purchase\s*date|order\s*date)\s*:?\s*([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4}|[0-9]{4}[\/\-][0-9]{1,2}[\/\-][0-9]{1,2}))/gi,
+    
+    // Invoice/Order numbers
+    invoiceNo: /(?:(?:invoice|bill|order|ref)\s*(?:no|number|#)\s*:?\s*([A-Za-z0-9\-\/]+))/gi
   };
   
   // Step 1: Extract global supplier information
@@ -2160,8 +2165,8 @@ function extractTableData(textItems) {
         case 'price':
           const price = parseFloat(value.replace(/[^\d.]/g, ''));
           if (price > 0) {
-            if (!item.selling_price) item.selling_price = price;
-            else if (!item.purchase_price) item.purchase_price = price;
+            // In purchase documents, prices are typically purchase/unit prices
+            if (!item.purchase_price) item.purchase_price = price;
           }
           break;
         case 'quantity':
@@ -2185,11 +2190,12 @@ function extractTableData(textItems) {
 
 function getColumnType(text) {
   text = text.toLowerCase();
-  if (/item|product|description|name|article/.test(text)) return 'item';
-  if (/price|rate|amount|cost|value/.test(text)) return 'price';
-  if (/qty|quantity|units?|nos?|pieces?/.test(text)) return 'quantity';
-  if (/code|barcode|sku|id/.test(text)) return 'code';
-  if (/supplier|party|vendor/.test(text)) return 'supplier';
+  if (/item|product|description|name|article|material|goods/.test(text)) return 'item';
+  if (/rate|unit\s*price|price|cost|amount|value/.test(text)) return 'price';
+  if (/qty|quantity|units?|nos?|pieces?|count/.test(text)) return 'quantity';
+  if (/code|barcode|sku|id|part\s*no/.test(text)) return 'code';
+  if (/supplier|party|vendor|from/.test(text)) return 'supplier';
+  if (/total/.test(text)) return 'total'; // For line totals
   return 'unknown';
 }
 
@@ -2228,18 +2234,21 @@ function extractPatternData(text, patterns, globalSupplier) {
     }
     
     if (currentItem) {
-      // Look for prices in the same or nearby lines
-      const priceMatches = [...trimmedLine.matchAll(patterns.pricePattern)];
-      priceMatches.forEach(match => {
-        const price = parseFloat(match[1].replace(/,/g, ''));
-        if (price > 0) {
-          if (!currentItem.selling_price) {
-            currentItem.selling_price = price;
-          } else if (!currentItem.purchase_price && price < currentItem.selling_price) {
-            currentItem.purchase_price = price;
-          }
+      // Look for purchase prices (unit price, rate, cost)
+      const purchasePriceMatches = [...trimmedLine.matchAll(patterns.purchasePrice)];
+      if (purchasePriceMatches.length > 0) {
+        const price = parseFloat(purchasePriceMatches[0][1].replace(/,/g, ''));
+        if (price > 0) currentItem.purchase_price = price;
+      }
+      
+      // Look for general unit prices if no specific purchase price found
+      if (!currentItem.purchase_price) {
+        const unitPriceMatches = [...trimmedLine.matchAll(patterns.unitPrice)];
+        if (unitPriceMatches.length > 0) {
+          const price = parseFloat(unitPriceMatches[0][1].replace(/,/g, ''));
+          if (price > 0) currentItem.purchase_price = price;
         }
-      });
+      }
       
       // Look for quantities
       const qtyMatches = [...trimmedLine.matchAll(patterns.quantity)];
@@ -2258,11 +2267,11 @@ function extractPatternData(text, patterns, globalSupplier) {
   return items;
 }
 
-// Structured text analysis for complex layouts
+// Structured text analysis for complex purchase document layouts
 function extractStructuredData(text, globalSupplier) {
   const items = [];
   
-  // Look for price-quantity-name patterns common in invoices
+  // Look for item-quantity-price patterns common in purchase invoices
   const complexPattern = /([A-Za-z][A-Za-z0-9\s\.,\-\/()&'\"]{5,50})\s+([0-9]+)\s+[₹$]?\s*([0-9,]+(?:\.[0-9]{1,2})?)/g;
   const matches = [...text.matchAll(complexPattern)];
   
@@ -2276,10 +2285,10 @@ function extractStructuredData(text, globalSupplier) {
         party_name: globalSupplier || 'PDF Import',
         item_name: itemName.trim(),
         barcode: '',
-        purchase_price: 0,
-        selling_price: parsedPrice,
+        purchase_price: parsedPrice, // This is the unit purchase price
+        selling_price: 0, // Will be set by user during import
         quantity: parsedQty,
-        notes: 'Extracted from structured text analysis',
+        notes: 'Extracted from purchase document - set selling price during import',
         source: 'structured'
       });
     }
@@ -2296,7 +2305,7 @@ function isHeaderOrFooter(line) {
 function isValidItem(item) {
   return item.item_name && 
          item.item_name.length > 2 && 
-         (item.purchase_price > 0 || item.selling_price > 0) &&
+         item.purchase_price > 0 && // Purchase documents must have purchase price
          item.quantity > 0;
 }
 
@@ -2317,20 +2326,18 @@ function validateAndCleanItem(item) {
     .trim()
     .substring(0, 100) || 'PDF Import';
   
-  // Ensure minimum price logic
-  if (!item.purchase_price && item.selling_price) {
-    item.purchase_price = Math.round(item.selling_price * 0.8); // Estimate 20% margin
-  }
+  // For purchase documents, selling price will be set by user during import
+  // No need to estimate selling price from purchase price
   
   return {
     party_name: item.party_name,
     item_name: item.item_name,
     barcode: item.barcode || '',
     purchase_price: item.purchase_price || 0,
-    selling_price: item.selling_price || 0,
+    selling_price: 0, // User will set this when importing to products
     quantity: Math.max(1, item.quantity || 1),
     purchase_date: new Date().toISOString().split('T')[0],
-    notes: item.notes || 'Imported from PDF'
+    notes: (item.notes || 'Imported from purchase document') + ' - Set selling price during product import'
   };
 }
 
@@ -2785,27 +2792,31 @@ function FileUploadModal({ onClose, onFileProcessed }) {
 
           {/* Expected Format Info */}
           <div className="mt-6 p-4 bg-primary-50 rounded-lg">
-            <h3 className="font-medium text-gray-900 mb-2">Expected File Format:</h3>
-            <p className="text-sm text-gray-600 mb-2">Your file should contain columns/data with these fields (flexible):</p>
+            <h3 className="font-medium text-gray-900 mb-2">Expected Purchase Document Data:</h3>
+            <p className="text-sm text-gray-600 mb-2">PDF processing focuses on purchase/invoice data with these fields:</p>
             <ul className="text-sm text-gray-600 space-y-1 mb-3">
-              <li>• <strong>Party Name/Supplier:</strong> Supplier name</li>
-              <li>• <strong>Item Name/Product:</strong> Product name</li>
-              <li>• <strong>Purchase Price/Cost Price:</strong> Purchase cost</li>
-              <li>• <strong>Selling Price/Sale Price:</strong> Selling price</li>
-              <li>• <strong>Quantity:</strong> Purchased quantity</li>
-              <li>• <strong>Barcode/Code:</strong> Product code (optional)</li>
-              <li>• <strong>Purchase Date/Date:</strong> Purchase date (optional)</li>
-              <li>• <strong>Notes/Description:</strong> Additional notes (optional)</li>
+              <li>• <strong>Supplier/Vendor:</strong> Company name (from invoice header)</li>
+              <li>• <strong>Item/Product Name:</strong> Product descriptions</li>
+              <li>• <strong>Unit Price/Rate:</strong> Purchase cost per item</li>
+              <li>• <strong>Quantity:</strong> Number of units purchased</li>
+              <li>• <strong>Product Code:</strong> Part numbers, SKUs (optional)</li>
+              <li>• <strong>Invoice Date:</strong> Purchase date (optional)</li>
             </ul>
+            <div className="text-xs text-gray-500 bg-blue-50 p-2 rounded">
+              <strong>💡 Note:</strong> Selling prices are NOT extracted from purchase documents. You'll set your own selling prices when importing items to your product catalog.
+            </div>
+          </div>
+          
+          <div className="mt-4">
             <div className="text-xs text-gray-500 bg-green-50 p-3 rounded mb-2">
-              <strong>🚀 Enhanced PDF Support - ACTIVE!</strong> 
+              <strong>🚀 Purchase Document Processing - ACTIVE!</strong> 
               <ul className="mt-1 space-y-1">
-                <li>• ✅ Real-time PDF text extraction</li>
-                <li>• 🧠 Smart table detection and parsing</li>
-                <li>• 🎯 AI pattern recognition for invoices</li>
-                <li>• 📊 Multi-page document processing (up to 15 pages)</li>
-                <li>• 🔍 Intelligent data validation and cleaning</li>
-                <li>• 💡 Works best with text-based PDFs</li>
+                <li>• ✅ Supplier invoice and purchase order processing</li>
+                <li>• 🧠 Smart table detection for item lists</li>
+                <li>• 🎯 Purchase price and quantity extraction</li>
+                <li>• 📊 Multi-page document support (up to 15 pages)</li>
+                <li>• 🔍 Automatic supplier and item validation</li>
+                <li>• 💰 Selling prices set by YOU during import</li>
               </ul>
             </div>
             <div className="text-xs text-gray-500 bg-amber-50 p-2 rounded">
