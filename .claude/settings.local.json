@@ -36,7 +36,8 @@
       "Bash(npm uninstall:*)",
       "Bash(npm run deploy:*)",
       "WebFetch(domain:stationery-business.vercel.app)",
-      "WebFetch(domain:stationery-business-25zcz2utu-mehak6s-projects.vercel.app)"
+      "WebFetch(domain:stationery-business-25zcz2utu-mehak6s-projects.vercel.app)",
+      "Bash(sed:*)"
     ],
     "deny": [],
     "ask": []

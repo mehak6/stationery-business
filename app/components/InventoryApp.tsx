@@ -69,17 +69,12 @@ function Dashboard({ onNavigate }) {
     const fetchDashboardData = async () => {
       try {
         setLoading(true);
-        console.log('[DEBUG] Dashboard: About to fetch dashboard data');
 
         const [analyticsData, salesData, productsData] = await Promise.all([
           getAnalytics(),
           getSales(5), // Get recent 5 sales
           getProducts()
         ]);
-
-        console.log('[DEBUG] Dashboard: analyticsData received:', analyticsData);
-        console.log('[DEBUG] Dashboard: salesData received:', salesData);
-        console.log('[DEBUG] Dashboard: salesData count:', salesData?.length || 0);
         setAnalytics(analyticsData || {
           totalProducts: 0,
           totalSales: 0,
@@ -145,7 +140,6 @@ function Dashboard({ onNavigate }) {
   const fetchAllSales = async (page: number = 1) => {
     try {
       setAllSalesLoading(true);
-      console.log(`[DEBUG] fetchAllSales: Fetching page ${page}, startDate: ${startDate}, endDate: ${endDate}`);
 
       const { supabase } = await import('../../supabase_client');
       let query = supabase
@@ -179,13 +173,10 @@ function Dashboard({ onNavigate }) {
 
       if (error) throw error;
 
-      console.log(`[DEBUG] fetchAllSales: Retrieved ${data?.length || 0} sales for page ${page}`);
-      console.log(`[DEBUG] fetchAllSales: Total sales available: ${count || 0}`);
 
       setAllSales(data || []);
 
     } catch (error) {
-      console.error('[DEBUG] fetchAllSales: Error fetching all sales:', error);
       setAllSales([]);
     } finally {
       setAllSalesLoading(false);
@@ -1335,32 +1326,20 @@ function PartyManagement({ onNavigate }) {
 
   // Fetch party purchases on component mount
   useEffect(() => {
-    console.log('[DEBUG] PartyManagement: useEffect triggered, about to fetch party purchases');
 
     const fetchData = async () => {
       try {
-        console.log('[DEBUG] PartyManagement: Setting loading to true');
         setLoading(true);
 
-        console.log('[DEBUG] PartyManagement: Calling getPartyPurchases()');
         const purchasesData = await getPartyPurchases();
-        console.log('[DEBUG] PartyManagement: getPartyPurchases() returned:', purchasesData);
 
         const safeData = purchasesData || [];
-        console.log('[DEBUG] PartyManagement: Setting partyPurchases state to:', safeData);
         setPartyPurchases(safeData);
 
-        console.log('[DEBUG] PartyManagement: Total party purchases loaded:', safeData.length);
       } catch (error) {
-        console.error('[DEBUG] PartyManagement: Error fetching party purchases:', error);
-        console.error('[DEBUG] PartyManagement: Error details:', {
-          message: error.message,
-          stack: error.stack,
-          code: error.code
-        });
+        console.error('Error fetching party purchases:', error);
         setPartyPurchases([]);
       } finally {
-        console.log('[DEBUG] PartyManagement: Setting loading to false');
         setLoading(false);
       }
     };
@@ -1376,10 +1355,6 @@ function PartyManagement({ onNavigate }) {
     return matchesSearch;
   });
 
-  // Debug logging for search and filtering
-  console.log('[DEBUG] PartyManagement: Search term:', searchTerm);
-  console.log('[DEBUG] PartyManagement: Total purchases before filter:', partyPurchases.length);
-  console.log('[DEBUG] PartyManagement: Filtered purchases count:', filteredPurchases.length);
 
   const handleDeletePurchase = async (purchaseId: string) => {
     if (!confirm('Are you sure you want to delete this purchase record?')) {
@@ -1644,7 +1619,6 @@ function PartyManagement({ onNavigate }) {
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            console.log('Upload button clicked');
             setShowUploadModal(true);
           }}
           onTouchStart={(e) => {
@@ -1666,7 +1640,6 @@ function PartyManagement({ onNavigate }) {
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            console.log('Add purchase button clicked');
             setShowAddForm(true);
           }}
           onTouchStart={(e) => {
@@ -2012,8 +1985,6 @@ function TransferModal({ purchase, onClose, onTransferComplete }) {
 
 // Enhanced PDF Text Parsing Function with better pattern recognition
 function parsePDFText(text) {
-  console.log('[DEBUG] PDF Text Parsing: Starting PDF text analysis');
-  console.log('[DEBUG] PDF Text Length:', text.length);
   
   const lines = text.split('\n').filter(line => line.trim().length > 0);
   const parsedData = [];
@@ -2051,7 +2022,6 @@ function parsePDFText(text) {
   let headers = [];
   let tableRows = [];
   
-  console.log('[DEBUG] PDF Text Parsing: Processing', lines.length, 'lines');
   
   // First pass: Detect table structure
   for (let i = 0; i < lines.length; i++) {
@@ -2068,7 +2038,6 @@ function parsePDFText(text) {
       if (potentialHeaders.some(h => h.match(/item|product|qty|price|amount/))) {
         headers = potentialHeaders;
         isInTable = true;
-        console.log('[DEBUG] PDF Table detected with headers:', headers);
         continue;
       }
     }
@@ -2089,7 +2058,6 @@ function parsePDFText(text) {
   
   // Process table data
   if (tableRows.length > 0 && headers.length > 0) {
-    console.log('[DEBUG] Processing', tableRows.length, 'table rows');
     
     tableRows.forEach((values, rowIndex) => {
       const record = {};
@@ -2122,7 +2090,6 @@ function parsePDFText(text) {
         });
       }
       
-      console.log('[DEBUG] Processed table row', rowIndex + 1, ':', record);
       
       // Validate and add record
       if (record.item_name && (record.purchase_price > 0 || record.selling_price > 0)) {
@@ -2142,7 +2109,6 @@ function parsePDFText(text) {
   
   // If no table data found, try pattern matching
   if (parsedData.length === 0) {
-    console.log('[DEBUG] No table found, trying pattern matching');
     
     let globalPartyName = '';
     let currentRecord = {};
@@ -2151,7 +2117,6 @@ function parsePDFText(text) {
     const partyMatch = text.match(/(?:from|supplier|vendor|sold\s*by|dealer)\s*:?\s*([A-Za-z0-9\s&\.,\-]+)(?:\n|address|phone|email|\d{6})/i);
     if (partyMatch) {
       globalPartyName = partyMatch[1].trim().split(/\n|address|phone|email/)[0].trim();
-      console.log('[DEBUG] Global party name found:', globalPartyName);
     }
     
     // Pattern matching approach
@@ -2221,7 +2186,6 @@ function parsePDFText(text) {
   
   // Fallback: Extract any price information
   if (parsedData.length === 0) {
-    console.log('[DEBUG] No structured data found, trying fallback extraction');
     
     const priceMatches = text.match(/[₹$]?\s*[0-9,]+(?:\.[0-9]{1,2})?/g);
     const itemMatches = text.match(/[A-Za-z][A-Za-z0-9\s]{3,30}(?=\s*[₹$]?[0-9])/g);
@@ -2244,9 +2208,7 @@ function parsePDFText(text) {
     }
   }
   
-  console.log('[DEBUG] PDF Text Parsing: Extracted', parsedData.length, 'records');
   parsedData.forEach((record, index) => {
-    console.log(`[DEBUG] Record ${index + 1}:`, record);
   });
   
   return parsedData;
@@ -2254,7 +2216,6 @@ function parsePDFText(text) {
 
 // Advanced PDF data processing function
 async function processPDFExtractedData(extractedData) {
-  console.log('[DEBUG] Processing extracted PDF data:', extractedData.metadata);
   
   const parsedItems = [];
   const { fullText, pages } = extractedData;
@@ -2298,14 +2259,12 @@ async function processPDFExtractedData(extractedData) {
       .trim()
       .replace(/[\r\n]+/g, ' ')
       .substring(0, 100); // Limit length
-    console.log('[DEBUG] Global supplier found:', globalSupplier);
   }
   
   // Step 2: Try table-based extraction first (most reliable)
   for (const page of pages) {
     const tableData = extractTableData(page.textItems);
     if (tableData.length > 0) {
-      console.log('[DEBUG] Found table data on page', page.pageNumber, ':', tableData.length, 'items');
       parsedItems.push(...tableData.map(item => ({
         ...item,
         party_name: item.party_name || globalSupplier || 'PDF Import',
@@ -2316,7 +2275,6 @@ async function processPDFExtractedData(extractedData) {
   
   // Step 3: If no table data, try pattern-based extraction
   if (parsedItems.length === 0) {
-    console.log('[DEBUG] No tables found, trying pattern-based extraction');
     
     const patternData = extractPatternData(fullText, patterns, globalSupplier);
     if (patternData.length > 0) {
@@ -2326,7 +2284,6 @@ async function processPDFExtractedData(extractedData) {
   
   // Step 4: Fallback - structured text analysis
   if (parsedItems.length === 0) {
-    console.log('[DEBUG] Pattern extraction failed, trying structured text analysis');
     
     const structuredData = extractStructuredData(fullText, globalSupplier);
     if (structuredData.length > 0) {
@@ -2339,7 +2296,6 @@ async function processPDFExtractedData(extractedData) {
     .map(item => validateAndCleanItem(item))
     .filter(item => item !== null);
   
-  console.log('[DEBUG] Final validated items:', validatedItems.length);
   return validatedItems;
 }
 
@@ -2392,7 +2348,6 @@ function extractTableData(textItems) {
     type: getColumnType(item.text)
   }));
   
-  console.log('[DEBUG] Table columns detected:', columns.map(c => c.text));
   
   // Extract data from each row
   const extractedItems = [];
@@ -2679,11 +2634,9 @@ function FileUploadModal({ onClose, onFileProcessed }) {
         const result = Papa.parse(text, { header: true, skipEmptyLines: true });
         parsedData = result.data;
         
-        console.log('[DEBUG] CSV parsing completed, found', parsedData.length, 'rows');
       } else if (fileExtension === 'pdf') {
         // 🚀 Full PDF Processing Activated!
         try {
-          console.log('[DEBUG] Starting enhanced PDF processing for file:', file.name);
           setUploadingStatus('🚀 Initializing PDF processor...');
           setProcessingProgress(5);
           
@@ -2725,7 +2678,6 @@ function FileUploadModal({ onClose, onFileProcessed }) {
           });
           
           const pdf = await loadingTask.promise;
-          console.log('[DEBUG] ✅ PDF loaded successfully! Pages:', pdf.numPages);
           
           setUploadingStatus(`📊 Extracting text from ${pdf.numPages} page(s)...`);
           setProcessingProgress(25);
@@ -2788,10 +2740,8 @@ function FileUploadModal({ onClose, onFileProcessed }) {
               const progress = 25 + (50 * pageNum / maxPages);
               setProcessingProgress(Math.round(progress));
               
-              console.log(`[DEBUG] Page ${pageNum} processed: ${pageTextItems.length} text items, ${pageText.length} characters`);
               
             } catch (pageError) {
-              console.warn(`[DEBUG] Warning: Could not process page ${pageNum}:`, pageError);
               extractedData.pages.push({
                 pageNumber: pageNum,
                 text: '',
@@ -2801,8 +2751,6 @@ function FileUploadModal({ onClose, onFileProcessed }) {
             }
           }
           
-          console.log('[DEBUG] 📋 Text extraction completed. Total text length:', extractedData.fullText.length);
-          console.log('[DEBUG] First 200 characters:', extractedData.fullText.substring(0, 200));
           
           if (extractedData.fullText.trim().length < 30) {
             throw new Error(`📄 PDF contains minimal extractable text (${extractedData.fullText.length} characters).\\n\\nThis might be:\\n• A scanned/image-based PDF\\n• An encrypted or protected PDF\\n• A PDF with mostly graphics\\n\\n💡 Try:\\n• Converting to text-based PDF\\n• Using OCR software first\\n• Converting to CSV/Excel format`);
@@ -2814,29 +2762,19 @@ function FileUploadModal({ onClose, onFileProcessed }) {
           // Process extracted data with our advanced algorithms
           parsedData = await processPDFExtractedData(extractedData);
           
-          console.log('[DEBUG] 🎯 PDF processing completed:', parsedData.length, 'items extracted');
           
           if (parsedData.length === 0) {
-            // Show helpful preview for debugging
             const preview = extractedData.fullText.substring(0, 1000);
             const previewLines = preview.split('\\n').slice(0, 15).join('\\n');
             
             throw new Error(`🔍 No purchase data found in PDF.\\n\\n📋 Text Preview:\\n${previewLines}${extractedData.fullText.length > 1000 ? '\\n\\n[...more text...]' : ''}\\n\\n💡 Expected data:\\n• Item/Product names\\n• Price information\\n• Quantity values\\n• Supplier details\\n\\n🔄 Try converting to CSV/Excel for guaranteed import.`);
           }
           
-          // Success! 
-          console.log('[DEBUG] 🎉 Successfully processed PDF:', {
-            fileName: file.name,
-            fileSize: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
-            pages: pdf.numPages,
-            textLength: extractedData.fullText.length,
-            itemsExtracted: parsedData.length
-          });
+          // Success!
           
           setProcessingProgress(95);
           
         } catch (error) {
-          console.error('[DEBUG] ❌ PDF processing error:', error);
           
           // Enhanced error handling with helpful messages
           let errorMessage = '🚨 PDF Processing Error\\n\\n';
@@ -2891,9 +2829,6 @@ function FileUploadModal({ onClose, onFileProcessed }) {
               notes: row.notes || 'Imported from PDF'
             };
           } else {
-            // Debug raw row data
-            console.log(`[DEBUG] Processing row ${index + 1}:`, row);
-            console.log(`[DEBUG] Row keys:`, Object.keys(row));
 
             // Map common column names for Excel/CSV (flexible mapping)
             const itemName = row['Item Name'] || row['item_name'] || row['Product'] || row['product'] || row['Product Name'];
@@ -2916,7 +2851,6 @@ function FileUploadModal({ onClose, onFileProcessed }) {
             };
           }
 
-          console.log(`[DEBUG] Processed purchase ${index + 1}:`, purchase);
 
           // Validate required fields
           if (purchase.item_name && (purchase.purchase_price > 0 || purchase.selling_price > 0) && purchase.purchased_quantity > 0) {
