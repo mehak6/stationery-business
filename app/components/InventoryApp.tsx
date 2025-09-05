@@ -554,8 +554,11 @@ function ProductManagement({ onNavigate }) {
           <p className="text-gray-600 mt-2">Manage your inventory items</p>
         </div>
         <button 
-          onClick={() => setShowAddForm(true)}
-          className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg mt-4 sm:mt-0 flex items-center"
+          onClick={() => {
+            alert('Desktop button clicked! showAddForm was: ' + showAddForm);
+            setShowAddForm(true);
+          }}
+          className="bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded-lg mt-4 sm:mt-0 flex items-center"
         >
           <Plus className="h-5 w-5 mr-2" />
           Add Product
@@ -746,11 +749,19 @@ function ProductManagement({ onNavigate }) {
       {/* Floating Add Button - Mobile Only */}
       <div className="md:hidden fixed bottom-6 right-6 z-[9999]">
         <button 
-          onClick={() => setShowAddForm(true)}
-          className="w-14 h-14 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-lg"
+          onClick={() => {
+            alert('Mobile button clicked! showAddForm was: ' + showAddForm);
+            setShowAddForm(true);
+          }}
+          className="w-14 h-14 bg-red-600 text-white rounded-full flex items-center justify-center shadow-lg"
         >
           <Plus className="w-6 h-6" />
         </button>
+      </div>
+
+      {/* Debug State Display */}
+      <div className="fixed top-4 left-4 bg-yellow-200 p-2 text-xs z-[10000]">
+        showAddForm: {showAddForm ? 'true' : 'false'}
       </div>
 
       {/* Add Product Modal */}
