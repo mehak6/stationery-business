@@ -746,26 +746,17 @@ function ProductManagement({ onNavigate }) {
       {/* Floating Add Button - Mobile Only */}
       <div className="md:hidden fixed bottom-6 right-6 z-50">
         <button 
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            console.log('Add product button clicked');
-            setShowAddForm(true);
-          }}
-          onTouchStart={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
-          className="btn-primary rounded-full p-4 shadow-lg hover:shadow-xl transition-shadow touch-target active:scale-95"
-          title="Add Product"
+          type="button"
+          onClick={() => setShowAddForm(true)}
+          className="bg-primary-600 hover:bg-primary-700 active:bg-primary-800 text-white rounded-full p-4 shadow-lg hover:shadow-xl transition-all duration-200 touch-target"
           style={{ 
             minHeight: '56px', 
             minWidth: '56px',
-            touchAction: 'manipulation',
-            WebkitTapHighlightColor: 'transparent'
+            touchAction: 'manipulation'
           }}
+          aria-label="Add Product"
         >
-          <Plus className="h-6 w-6 pointer-events-none" />
+          <Plus className="h-6 w-6" />
         </button>
       </div>
 
