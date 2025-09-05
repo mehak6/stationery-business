@@ -554,7 +554,10 @@ function ProductManagement({ onNavigate }) {
           <p className="text-gray-600 mt-2">Manage your inventory items</p>
         </div>
         <button 
-          onClick={() => setShowAddForm(true)}
+          onClick={() => {
+            console.log('Desktop Add Product button clicked');
+            setShowAddForm(true);
+          }}
           className="btn-primary mt-4 sm:mt-0"
         >
           <Plus className="h-5 w-5 mr-2" />
@@ -747,7 +750,11 @@ function ProductManagement({ onNavigate }) {
       <div className="md:hidden fixed bottom-6 right-6 z-50">
         <button 
           type="button"
-          onClick={() => setShowAddForm(true)}
+          onClick={() => {
+            console.log('Mobile Add Product button clicked, showAddForm was:', showAddForm);
+            setShowAddForm(true);
+            console.log('Mobile Add Product button - setShowAddForm(true) called');
+          }}
           className="bg-primary-600 hover:bg-primary-700 active:bg-primary-800 text-white rounded-full p-4 shadow-lg hover:shadow-xl transition-all duration-200 touch-target"
           style={{ 
             minHeight: '56px', 
@@ -761,15 +768,22 @@ function ProductManagement({ onNavigate }) {
       </div>
 
       {/* Add Product Modal */}
-      {showAddForm && (
-        <AddProductModal 
-          onClose={() => setShowAddForm(false)}
-          onProductAdded={(newProduct) => {
-            setProducts([newProduct, ...products]);
-            setShowAddForm(false);
-          }}
-        />
-      )}
+      {(() => {
+        console.log('Rendering Products component, showAddForm is:', showAddForm);
+        return showAddForm && (
+          <AddProductModal 
+            onClose={() => {
+              console.log('AddProductModal onClose called');
+              setShowAddForm(false);
+            }}
+            onProductAdded={(newProduct) => {
+              console.log('AddProductModal onProductAdded called');
+              setProducts([newProduct, ...products]);
+              setShowAddForm(false);
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }
