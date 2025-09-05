@@ -427,6 +427,10 @@ function ProductManagement({ onNavigate }) {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
+  const [editingProduct, setEditingProduct] = useState(null);
+  const [editingField, setEditingField] = useState(null);
+  const [tempValue, setTempValue] = useState('');
+  const [saving, setSaving] = useState(false);
 
   // Fetch products on component mount
   useEffect(() => {
@@ -464,6 +468,80 @@ function ProductManagement({ onNavigate }) {
     } catch (error) {
       console.error('Error deleting product:', error);
       alert('Error deleting product: ' + error.message);
+    }
+  };
+
+  // Start editing a field
+  const startEditing = (productId, fieldName, currentValue) => {
+    setEditingProduct(productId);
+    setEditingField(fieldName);
+    setTempValue(currentValue.toString());
+  };
+
+  // Cancel editing
+  const cancelEditing = () => {
+    setEditingProduct(null);
+    setEditingField(null);
+    setTempValue('');
+  };
+
+  // Save the edited value
+  const saveEdit = async (productId, fieldName, newValue) => {
+    if (!newValue.trim() || newValue === '') {
+      alert('Value cannot be empty');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      // Parse numeric values
+      let processedValue = newValue;
+      if (fieldName === 'purchase_price' || fieldName === 'selling_price') {
+        processedValue = parseFloat(newValue);
+        if (isNaN(processedValue) || processedValue < 0) {
+          alert('Please enter a valid price');
+          setSaving(false);
+          return;
+        }
+      } else if (fieldName === 'stock_quantity' || fieldName === 'min_stock_level') {
+        processedValue = parseInt(newValue);
+        if (isNaN(processedValue) || processedValue < 0) {
+          alert('Please enter a valid quantity');
+          setSaving(false);
+          return;
+        }
+      }
+
+      // Update the product
+      const updatedProduct = {
+        ...products.find(p => p.id === productId),
+        [fieldName]: processedValue
+      };
+
+      await updateProduct(productId, updatedProduct);
+      
+      // Update local state
+      setProducts(products.map(p => 
+        p.id === productId ? { ...p, [fieldName]: processedValue } : p
+      ));
+
+      // Clear editing state
+      cancelEditing();
+      
+    } catch (error) {
+      console.error('Error updating product:', error);
+      alert('Error updating product: ' + error.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Handle key press in edit mode
+  const handleKeyPress = (e, productId, fieldName) => {
+    if (e.key === 'Enter') {
+      saveEdit(productId, fieldName, tempValue);
+    } else if (e.key === 'Escape') {
+      cancelEditing();
     }
   };
 
@@ -518,11 +596,31 @@ function ProductManagement({ onNavigate }) {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           {filteredProducts.map(product => (
           <div key={product.id} className="card hover:shadow-md transition-shadow">
-            <div className="flex items-center justify-end mb-4">
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-xs text-gray-500">
+                {editingProduct === product.id ? 'Editing...' : 'Click values to edit'}
+              </div>
               <div className="flex gap-2">
-                <button className="p-1 text-gray-400 hover:text-primary-600">
-                  <Edit className="h-4 w-4" />
-                </button>
+                {editingProduct === product.id && (
+                  <>
+                    <button 
+                      onClick={() => saveEdit(editingProduct, editingField, tempValue)}
+                      disabled={saving}
+                      className="p-1 text-green-600 hover:text-green-800"
+                      title="Save (Enter)"
+                    >
+                      <Check className="h-4 w-4" />
+                    </button>
+                    <button 
+                      onClick={cancelEditing}
+                      disabled={saving}
+                      className="p-1 text-gray-400 hover:text-gray-600"
+                      title="Cancel (Esc)"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </>
+                )}
                 <button 
                   onClick={() => handleDeleteProduct(product.id)}
                   className="p-1 text-gray-400 hover:text-danger-600"
@@ -538,25 +636,106 @@ function ProductManagement({ onNavigate }) {
             </div>
 
             <div className="space-y-2">
-              <div className="flex justify-between">
+              {/* Purchase Price */}
+              <div className="flex justify-between items-center">
                 <span className="text-sm text-gray-500">Purchase:</span>
-                <span className="font-medium">₹{product.purchase_price}</span>
+                {editingProduct === product.id && editingField === 'purchase_price' ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm">₹</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={tempValue}
+                      onChange={(e) => setTempValue(e.target.value)}
+                      onKeyDown={(e) => handleKeyPress(e, product.id, 'purchase_price')}
+                      className="w-20 px-2 py-1 border border-primary-300 rounded text-sm focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
+                      autoFocus
+                    />
+                  </div>
+                ) : (
+                  <span 
+                    className="font-medium cursor-pointer hover:bg-primary-50 px-2 py-1 rounded text-primary-700 hover:text-primary-800"
+                    onClick={() => startEditing(product.id, 'purchase_price', product.purchase_price)}
+                    title="Click to edit purchase price"
+                  >
+                    ₹{product.purchase_price}
+                  </span>
+                )}
               </div>
-              <div className="flex justify-between">
+
+              {/* Selling Price */}
+              <div className="flex justify-between items-center">
                 <span className="text-sm text-gray-500">Selling:</span>
-                <span className="font-medium text-secondary-600">₹{product.selling_price}</span>
+                {editingProduct === product.id && editingField === 'selling_price' ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm">₹</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={tempValue}
+                      onChange={(e) => setTempValue(e.target.value)}
+                      onKeyDown={(e) => handleKeyPress(e, product.id, 'selling_price')}
+                      className="w-20 px-2 py-1 border border-secondary-300 rounded text-sm focus:ring-1 focus:ring-secondary-500 focus:border-secondary-500"
+                      autoFocus
+                    />
+                  </div>
+                ) : (
+                  <span 
+                    className="font-medium text-secondary-600 cursor-pointer hover:bg-secondary-50 px-2 py-1 rounded hover:text-secondary-800"
+                    onClick={() => startEditing(product.id, 'selling_price', product.selling_price)}
+                    title="Click to edit selling price"
+                  >
+                    ₹{product.selling_price}
+                  </span>
+                )}
               </div>
-              <div className="flex justify-between">
+
+              {/* Stock Quantity */}
+              <div className="flex justify-between items-center">
                 <span className="text-sm text-gray-500">Stock:</span>
-                <span className={`font-medium ${product.stock_quantity <= product.min_stock_level ? 'text-danger-600' : 'text-gray-900'}`}>
-                  {product.stock_quantity} units
-                </span>
+                {editingProduct === product.id && editingField === 'stock_quantity' ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="0"
+                      value={tempValue}
+                      onChange={(e) => setTempValue(e.target.value)}
+                      onKeyDown={(e) => handleKeyPress(e, product.id, 'stock_quantity')}
+                      className="w-16 px-2 py-1 border border-accent-300 rounded text-sm focus:ring-1 focus:ring-accent-500 focus:border-accent-500"
+                      autoFocus
+                    />
+                    <span className="text-sm">units</span>
+                  </div>
+                ) : (
+                  <span 
+                    className={`font-medium cursor-pointer px-2 py-1 rounded ${
+                      product.stock_quantity <= product.min_stock_level 
+                        ? 'text-danger-600 hover:bg-danger-50 hover:text-danger-800' 
+                        : 'text-gray-900 hover:bg-accent-50 hover:text-accent-800'
+                    }`}
+                    onClick={() => startEditing(product.id, 'stock_quantity', product.stock_quantity)}
+                    title="Click to edit stock quantity"
+                  >
+                    {product.stock_quantity} units
+                  </span>
+                )}
               </div>
             </div>
 
             {product.stock_quantity <= product.min_stock_level && (
               <div className="mt-3 p-2 bg-danger-50 border border-danger-200 rounded-lg">
                 <p className="text-xs text-danger-700 font-medium">Low Stock Alert!</p>
+              </div>
+            )}
+
+            {saving && editingProduct === product.id && (
+              <div className="mt-3 p-2 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-xs text-blue-700 font-medium flex items-center">
+                  <div className="loading-spinner h-3 w-3 mr-2"></div>
+                  Saving changes...
+                </p>
               </div>
             )}
           </div>
