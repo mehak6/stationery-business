@@ -2407,9 +2407,185 @@ function FileUploadModal({ onClose, onFileProcessed }) {
         
         console.log('[DEBUG] CSV parsing completed, found', parsedData.length, 'rows');
       } else if (fileExtension === 'pdf') {
-        // 🎉 Enhanced PDF Processing Available!
-        alert(`🚀 Enhanced PDF Processing Ready!\n\n✨ Your PDF processing system includes:\n\n📊 Smart Table Detection\n• Automatically identifies table structures\n• Column mapping with header recognition\n• Multi-page table support\n\n🧠 Advanced Pattern Recognition\n• Invoice format detection\n• Supplier information extraction\n• Price and quantity parsing\n\n🎯 Intelligent Data Extraction\n• Item name recognition\n• Purchase/selling price detection\n• Quantity and barcode extraction\n\n📄 File Details:\n• Name: ${file.name}\n• Size: ${(file.size / 1024 / 1024).toFixed(2)} MB\n• Type: PDF Document\n\n🔄 Currently optimizing for production...\nFor immediate use, please convert to CSV/Excel format.\n\nComing very soon with full PDF support! 🎉`);
-        return;
+        // 🚀 Full PDF Processing Activated!
+        try {
+          console.log('[DEBUG] Starting enhanced PDF processing for file:', file.name);
+          setUploadingStatus('🚀 Initializing PDF processor...');
+          setProcessingProgress(5);
+          
+          // Use a more compatible approach - load PDF.js via CDN
+          if (!window.pdfjsLib) {
+            // Load PDF.js from CDN if not already loaded
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js';
+            document.head.appendChild(script);
+            
+            // Wait for load
+            await new Promise((resolve, reject) => {
+              script.onload = resolve;
+              script.onerror = reject;
+            });
+          }
+          
+          const pdfjsLib = window.pdfjsLib;
+          
+          // Configure PDF.js worker
+          if (typeof window !== 'undefined') {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js`;
+          }
+          
+          setUploadingStatus('📄 Loading PDF document...');
+          setProcessingProgress(15);
+          
+          const arrayBuffer = await file.arrayBuffer();
+          
+          // Load PDF with proper configuration
+          const loadingTask = pdfjsLib.getDocument({
+            data: arrayBuffer,
+            cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/cmaps/',
+            cMapPacked: true,
+            standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/standard_fonts/',
+            disableFontFace: false,
+            disableRange: false,
+            disableStream: false
+          });
+          
+          const pdf = await loadingTask.promise;
+          console.log('[DEBUG] ✅ PDF loaded successfully! Pages:', pdf.numPages);
+          
+          setUploadingStatus(`📊 Extracting text from ${pdf.numPages} page(s)...`);
+          setProcessingProgress(25);
+          
+          let extractedData = {
+            fullText: '',
+            pages: [],
+            metadata: {
+              numPages: pdf.numPages,
+              title: file.name,
+              fileSize: file.size
+            }
+          };
+          
+          // Process each page with enhanced extraction
+          const maxPages = Math.min(pdf.numPages, 15); // Process up to 15 pages
+          for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
+            setUploadingStatus(`🔍 Analyzing page ${pageNum} of ${maxPages}...`);
+            
+            try {
+              const page = await pdf.getPage(pageNum);
+              const textContent = await page.getTextContent();
+              
+              // Extract text with positioning and formatting info
+              const pageTextItems = textContent.items
+                .map(item => {
+                  if (item.str && item.str.trim()) {
+                    return {
+                      text: item.str,
+                      x: item.transform ? item.transform[4] : 0,
+                      y: item.transform ? item.transform[5] : 0,
+                      width: item.width || 0,
+                      height: item.height || 0,
+                      fontName: item.fontName || '',
+                      fontSize: (item.transform && item.transform[0]) || 12
+                    };
+                  }
+                  return null;
+                })
+                .filter(item => item !== null);
+              
+              // Combine text with proper spacing
+              const pageText = pageTextItems
+                .sort((a, b) => b.y - a.y || a.x - b.x) // Sort by position
+                .map(item => item.text)
+                .join(' ')
+                .replace(/\\s+/g, ' ')
+                .trim();
+              
+              extractedData.pages.push({
+                pageNumber: pageNum,
+                text: pageText,
+                textItems: pageTextItems,
+                itemCount: pageTextItems.length
+              });
+              
+              extractedData.fullText += pageText + '\\n\\n';
+              
+              // Update progress
+              const progress = 25 + (50 * pageNum / maxPages);
+              setProcessingProgress(Math.round(progress));
+              
+              console.log(`[DEBUG] Page ${pageNum} processed: ${pageTextItems.length} text items, ${pageText.length} characters`);
+              
+            } catch (pageError) {
+              console.warn(`[DEBUG] Warning: Could not process page ${pageNum}:`, pageError);
+              extractedData.pages.push({
+                pageNumber: pageNum,
+                text: '',
+                textItems: [],
+                error: pageError.message
+              });
+            }
+          }
+          
+          console.log('[DEBUG] 📋 Text extraction completed. Total text length:', extractedData.fullText.length);
+          console.log('[DEBUG] First 200 characters:', extractedData.fullText.substring(0, 200));
+          
+          if (extractedData.fullText.trim().length < 30) {
+            throw new Error(`📄 PDF contains minimal extractable text (${extractedData.fullText.length} characters).\\n\\nThis might be:\\n• A scanned/image-based PDF\\n• An encrypted or protected PDF\\n• A PDF with mostly graphics\\n\\n💡 Try:\\n• Converting to text-based PDF\\n• Using OCR software first\\n• Converting to CSV/Excel format`);
+          }
+          
+          setUploadingStatus('🧠 Analyzing content with AI patterns...');
+          setProcessingProgress(80);
+          
+          // Process extracted data with our advanced algorithms
+          parsedData = await processPDFExtractedData(extractedData);
+          
+          console.log('[DEBUG] 🎯 PDF processing completed:', parsedData.length, 'items extracted');
+          
+          if (parsedData.length === 0) {
+            // Show helpful preview for debugging
+            const preview = extractedData.fullText.substring(0, 1000);
+            const previewLines = preview.split('\\n').slice(0, 15).join('\\n');
+            
+            throw new Error(`🔍 No purchase data found in PDF.\\n\\n📋 Text Preview:\\n${previewLines}${extractedData.fullText.length > 1000 ? '\\n\\n[...more text...]' : ''}\\n\\n💡 Expected data:\\n• Item/Product names\\n• Price information\\n• Quantity values\\n• Supplier details\\n\\n🔄 Try converting to CSV/Excel for guaranteed import.`);
+          }
+          
+          // Success! 
+          console.log('[DEBUG] 🎉 Successfully processed PDF:', {
+            fileName: file.name,
+            fileSize: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
+            pages: pdf.numPages,
+            textLength: extractedData.fullText.length,
+            itemsExtracted: parsedData.length
+          });
+          
+          setProcessingProgress(95);
+          
+        } catch (error) {
+          console.error('[DEBUG] ❌ PDF processing error:', error);
+          
+          // Enhanced error handling with helpful messages
+          let errorMessage = '🚨 PDF Processing Error\\n\\n';
+          
+          if (error.name === 'InvalidPDFException' || error.message.includes('Invalid PDF')) {
+            errorMessage += '📄 Invalid PDF: File appears to be corrupted or not a valid PDF document.';
+          } else if (error.name === 'MissingPDFException') {
+            errorMessage += '📄 Empty PDF: The PDF file is empty or missing content.';
+          } else if (error.name === 'UnexpectedResponseException') {
+            errorMessage += '📄 Loading Error: Unable to load the PDF file. It may be corrupted.';
+          } else if (error.name === 'PasswordException') {
+            errorMessage += '🔒 Protected PDF: This PDF is password-protected and cannot be processed.';
+          } else if (error.message.includes('Cannot resolve module')) {
+            errorMessage += '⚙️ System Error: PDF processor loading failed. Please try again.';
+          } else {
+            errorMessage += error.message;
+          }
+          
+          errorMessage += `\\n\\n📊 File Info:\\n• Name: ${file.name}\\n• Size: ${(file.size / 1024 / 1024).toFixed(2)} MB\\n\\n💡 Alternative: Convert to CSV/Excel format for reliable import.`;
+          
+          alert(errorMessage);
+          return;
+        }
       } else {
         // Unsupported file type
         alert('Unsupported file type. Please use CSV files for bulk import or enter data manually.');
@@ -2621,14 +2797,15 @@ function FileUploadModal({ onClose, onFileProcessed }) {
               <li>• <strong>Purchase Date/Date:</strong> Purchase date (optional)</li>
               <li>• <strong>Notes/Description:</strong> Additional notes (optional)</li>
             </ul>
-            <div className="text-xs text-gray-500 bg-blue-50 p-3 rounded mb-2">
-              <strong>📄 Enhanced PDF Support:</strong> 
+            <div className="text-xs text-gray-500 bg-green-50 p-3 rounded mb-2">
+              <strong>🚀 Enhanced PDF Support - ACTIVE!</strong> 
               <ul className="mt-1 space-y-1">
-                <li>• Automatic text extraction from PDF documents</li>
-                <li>• Smart table detection and parsing</li>
-                <li>• Pattern recognition for invoices and purchase orders</li>
-                <li>• Fallback extraction for unstructured PDFs</li>
-                <li>• Works best with text-based PDFs (not scanned images)</li>
+                <li>• ✅ Real-time PDF text extraction</li>
+                <li>• 🧠 Smart table detection and parsing</li>
+                <li>• 🎯 AI pattern recognition for invoices</li>
+                <li>• 📊 Multi-page document processing (up to 15 pages)</li>
+                <li>• 🔍 Intelligent data validation and cleaning</li>
+                <li>• 💡 Works best with text-based PDFs</li>
               </ul>
             </div>
             <div className="text-xs text-gray-500 bg-amber-50 p-2 rounded">

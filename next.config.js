@@ -35,10 +35,17 @@ const nextConfig = {
         zlib: false
       }
       
-      // Handle PDF.js worker
+      // PDF.js configuration for v2.16.105
       config.resolve.alias = {
         ...config.resolve.alias,
         'pdfjs-dist/build/pdf.worker.js': 'pdfjs-dist/build/pdf.worker.min.js'
+      }
+      
+      // Ignore problematic imports
+      config.externals = config.externals || {}
+      config.externals = {
+        ...config.externals,
+        canvas: 'canvas'
       }
     }
     
