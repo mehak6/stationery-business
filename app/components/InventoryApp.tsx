@@ -554,11 +554,8 @@ function ProductManagement({ onNavigate }) {
           <p className="text-gray-600 mt-2">Manage your inventory items</p>
         </div>
         <button 
-          onClick={() => {
-            console.log('Desktop Add Product button clicked');
-            setShowAddForm(true);
-          }}
-          className="btn-primary mt-4 sm:mt-0"
+          onClick={() => setShowAddForm(true)}
+          className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg mt-4 sm:mt-0 flex items-center"
         >
           <Plus className="h-5 w-5 mr-2" />
           Add Product
@@ -747,43 +744,25 @@ function ProductManagement({ onNavigate }) {
       )}
 
       {/* Floating Add Button - Mobile Only */}
-      <div className="md:hidden fixed bottom-6 right-6 z-50">
+      <div className="md:hidden fixed bottom-6 right-6 z-[9999]">
         <button 
-          type="button"
-          onClick={() => {
-            console.log('Mobile Add Product button clicked, showAddForm was:', showAddForm);
-            setShowAddForm(true);
-            console.log('Mobile Add Product button - setShowAddForm(true) called');
-          }}
-          className="bg-primary-600 hover:bg-primary-700 active:bg-primary-800 text-white rounded-full p-4 shadow-lg hover:shadow-xl transition-all duration-200 touch-target"
-          style={{ 
-            minHeight: '56px', 
-            minWidth: '56px',
-            touchAction: 'manipulation'
-          }}
-          aria-label="Add Product"
+          onClick={() => setShowAddForm(true)}
+          className="w-14 h-14 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-lg"
         >
-          <Plus className="h-6 w-6" />
+          <Plus className="w-6 h-6" />
         </button>
       </div>
 
       {/* Add Product Modal */}
-      {(() => {
-        console.log('Rendering Products component, showAddForm is:', showAddForm);
-        return showAddForm && (
-          <AddProductModal 
-            onClose={() => {
-              console.log('AddProductModal onClose called');
-              setShowAddForm(false);
-            }}
-            onProductAdded={(newProduct) => {
-              console.log('AddProductModal onProductAdded called');
-              setProducts([newProduct, ...products]);
-              setShowAddForm(false);
-            }}
-          />
-        );
-      })()}
+      {showAddForm && (
+        <AddProductModal 
+          onClose={() => setShowAddForm(false)}
+          onProductAdded={(newProduct) => {
+            setProducts([newProduct, ...products]);
+            setShowAddForm(false);
+          }}
+        />
+      )}
     </div>
   );
 }
