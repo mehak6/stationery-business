@@ -1687,133 +1687,244 @@ function TransferModal({ purchase, onClose, onTransferComplete }) {
   );
 }
 
-// PDF Text Parsing Function
+// Enhanced PDF Text Parsing Function with better pattern recognition
 function parsePDFText(text) {
+  console.log('[DEBUG] PDF Text Parsing: Starting PDF text analysis');
+  console.log('[DEBUG] PDF Text Length:', text.length);
+  
   const lines = text.split('\n').filter(line => line.trim().length > 0);
   const parsedData = [];
   
-  // Try to identify table-like structures or key-value pairs
+  // Enhanced patterns with more variations and better matching
+  const patterns = {
+    // Supplier/Party patterns
+    party: /(?:(?:from|supplier|vendor|party|sold\s*by|dealer|distributor|company)\s*:?\s*([A-Za-z0-9\s&\.,-]+))(?:\n|\r|$)/i,
+    
+    // Item/Product patterns with better context recognition
+    item: /(?:(?:item|product|description|name|article|goods?)\s*:?\s*([A-Za-z0-9\s\.,\-\/()&]+))(?:\n|\r|$|\s{2,})/i,
+    
+    // Enhanced price patterns with currency support
+    purchasePrice: /(?:(?:purchase|cost|buy|wholesale|cp|rate)\s*(?:price)?\s*:?\s*(?:[₹$]?\s*)?([0-9,]+(?:\.[0-9]{1,2})?))/i,
+    sellingPrice: /(?:(?:sell|sale|retail|selling|mrp|sp|rate)\s*(?:price)?\s*:?\s*(?:[₹$]?\s*)?([0-9,]+(?:\.[0-9]{1,2})?))/i,
+    
+    // Quantity patterns
+    quantity: /(?:(?:quantity|qty|amount|units?|nos?|pieces?|pcs?)\s*:?\s*([0-9,]+))/i,
+    
+    // Barcode/SKU patterns
+    barcode: /(?:(?:barcode|code|sku|item\s*code|product\s*id|id)\s*:?\s*([A-Za-z0-9\-_\/]+))/i,
+    
+    // Date patterns with multiple formats
+    date: /(?:(?:date|purchased|bought|invoice\s*date|bill\s*date)\s*:?\s*([0-9]{1,2}[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{2,4}|[0-9]{4}[\/\-\.][0-9]{1,2}[\/\-\.][0-9]{1,2}))/i,
+    
+    // Notes/Description patterns
+    notes: /(?:(?:notes?|remarks?|description|details?)\s*:?\s*([^\n\r]+))/i
+  };
+  
+  // Table detection patterns
+  const tableHeaders = /(?:item|product|description|name|qty|quantity|rate|price|amount|total|code|barcode)/i;
+  
   let currentRecord = {};
   let isInTable = false;
   let headers = [];
+  let tableRows = [];
   
-  // Common patterns to look for
-  const patterns = {
-    party: /(?:party|supplier|vendor|from)[\s:]+([^\n\r]+)/i,
-    item: /(?:item|product|description|name)[\s:]+([^\n\r]+)/i,
-    purchasePrice: /(?:purchase|cost|buy)[\s\$₹]*price[\s:]*[\$₹]*([0-9,\.]+)/i,
-    sellingPrice: /(?:sell|sale|retail)[\s\$₹]*price[\s:]*[\$₹]*([0-9,\.]+)/i,
-    quantity: /(?:quantity|qty|amount|units?)[\s:]*([0-9,\.]+)/i,
-    barcode: /(?:barcode|code|sku|id)[\s:]+([A-Za-z0-9\-_]+)/i,
-    date: /(?:date|purchased|bought)[\s:]*([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4})/i,
-    notes: /(?:notes?|remarks?|description)[\s:]+([^\n\r]+)/i
-  };
+  console.log('[DEBUG] PDF Text Parsing: Processing', lines.length, 'lines');
   
-  // Try to extract structured data from text
+  // First pass: Detect table structure
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     
-    // Skip empty lines and headers
-    if (!line || line.match(/^(page|total|subtotal|invoice|receipt)/i)) continue;
-    
-    // Check for table headers
-    if (line.match(/party|supplier|item|product|price|quantity|qty/i) && 
-        line.split(/\s{2,}|\t/).length > 2) {
-      headers = line.split(/\s{2,}|\t/).map(h => h.trim().toLowerCase());
-      isInTable = true;
+    // Skip headers, footers, and irrelevant lines
+    if (!line || line.match(/^(page\s*\d*|total|subtotal|grand\s*total|invoice|receipt|bill|thank\s*you)/i)) {
       continue;
     }
     
-    // If we're in a table and have headers, try to parse as table row
+    // Check for potential table headers
+    if (line.match(tableHeaders) && line.split(/\s{2,}|\t|\|/).length > 2) {
+      const potentialHeaders = line.split(/\s{2,}|\t|\|/).map(h => h.trim().toLowerCase());
+      if (potentialHeaders.some(h => h.match(/item|product|qty|price|amount/))) {
+        headers = potentialHeaders;
+        isInTable = true;
+        console.log('[DEBUG] PDF Table detected with headers:', headers);
+        continue;
+      }
+    }
+    
+    // If in table, collect rows
     if (isInTable && headers.length > 0) {
-      const values = line.split(/\s{2,}|\t/).map(v => v.trim());
-      if (values.length >= headers.length - 1) {
-        const record = {};
-        headers.forEach((header, index) => {
-          if (values[index]) {
-            if (header.includes('party') || header.includes('supplier')) record.party_name = values[index];
-            else if (header.includes('item') || header.includes('product')) record.item_name = values[index];
-            else if (header.includes('purchase') || header.includes('cost')) record.purchase_price = parseFloat(values[index].replace(/[^\d.]/g, '')) || 0;
-            else if (header.includes('sell') || header.includes('sale')) record.selling_price = parseFloat(values[index].replace(/[^\d.]/g, '')) || 0;
-            else if (header.includes('qty') || header.includes('quantity')) record.quantity = parseInt(values[index]) || 0;
-            else if (header.includes('code') || header.includes('barcode')) record.barcode = values[index];
-            else if (header.includes('date')) record.date = values[index];
+      const values = line.split(/\s{2,}|\t|\|/).map(v => v.trim());
+      if (values.length >= Math.max(2, headers.length - 2)) {
+        tableRows.push(values);
+        continue;
+      } else if (values.length === 1 && values[0].length < 10) {
+        // Likely end of table
+        isInTable = false;
+        break;
+      }
+    }
+  }
+  
+  // Process table data
+  if (tableRows.length > 0 && headers.length > 0) {
+    console.log('[DEBUG] Processing', tableRows.length, 'table rows');
+    
+    tableRows.forEach((values, rowIndex) => {
+      const record = {};
+      
+      // Map headers to values
+      headers.forEach((header, colIndex) => {
+        if (colIndex < values.length && values[colIndex]) {
+          const value = values[colIndex].trim();
+          
+          if (header.match(/party|supplier|vendor/)) record.party_name = value;
+          else if (header.match(/item|product|description|name/)) record.item_name = value;
+          else if (header.match(/purchase|cost|wholesale|cp/)) record.purchase_price = parseFloat(value.replace(/[^\d.]/g, '')) || 0;
+          else if (header.match(/sell|sale|retail|mrp|sp|rate|price/) && !header.match(/purchase|cost/)) record.selling_price = parseFloat(value.replace(/[^\d.]/g, '')) || 0;
+          else if (header.match(/qty|quantity|units?|nos?|pieces?/)) record.quantity = parseInt(value.replace(/[^\d]/g, '')) || 1;
+          else if (header.match(/code|barcode|sku/)) record.barcode = value;
+          else if (header.match(/date/)) record.date = value;
+        }
+      });
+      
+      // If no explicit purchase/selling price columns, try to infer from price columns
+      if (!record.purchase_price && !record.selling_price) {
+        headers.forEach((header, colIndex) => {
+          if (header.match(/price|rate|amount/) && colIndex < values.length) {
+            const price = parseFloat(values[colIndex].replace(/[^\d.]/g, '')) || 0;
+            if (price > 0) {
+              if (!record.selling_price) record.selling_price = price;
+              else if (!record.purchase_price) record.purchase_price = price * 0.8; // Estimate 20% margin
+            }
           }
         });
-        
-        if (record.item_name && (record.purchase_price > 0 || record.selling_price > 0)) {
-          parsedData.push(record);
-        }
-        continue;
-      } else {
-        isInTable = false; // End of table
       }
-    }
-    
-    // Try pattern matching for key-value pairs
-    let foundMatch = false;
-    for (const [key, pattern] of Object.entries(patterns)) {
-      const match = line.match(pattern);
-      if (match) {
-        foundMatch = true;
-        switch (key) {
-          case 'party':
-            currentRecord.party_name = match[1].trim();
-            break;
-          case 'item':
-            currentRecord.item_name = match[1].trim();
-            break;
-          case 'purchasePrice':
-            currentRecord.purchase_price = parseFloat(match[1].replace(/,/g, '')) || 0;
-            break;
-          case 'sellingPrice':
-            currentRecord.selling_price = parseFloat(match[1].replace(/,/g, '')) || 0;
-            break;
-          case 'quantity':
-            currentRecord.quantity = parseInt(match[1]) || 0;
-            break;
-          case 'barcode':
-            currentRecord.barcode = match[1].trim();
-            break;
-          case 'date':
-            currentRecord.date = match[1].trim();
-            break;
-          case 'notes':
-            currentRecord.notes = match[1].trim();
-            break;
-        }
+      
+      console.log('[DEBUG] Processed table row', rowIndex + 1, ':', record);
+      
+      // Validate and add record
+      if (record.item_name && (record.purchase_price > 0 || record.selling_price > 0)) {
+        parsedData.push({
+          party_name: record.party_name || 'Table Import',
+          item_name: record.item_name,
+          barcode: record.barcode || '',
+          purchase_price: record.purchase_price || 0,
+          selling_price: record.selling_price || 0,
+          quantity: record.quantity || 1,
+          date: record.date || '',
+          notes: 'Imported from PDF table'
+        });
       }
-    }
-    
-    // If we found a complete record (has item and at least one price), save it
-    if (currentRecord.item_name && (currentRecord.purchase_price > 0 || currentRecord.selling_price > 0)) {
-      // If we just completed a record, save it and start a new one
-      if (foundMatch && Object.keys(currentRecord).length >= 3) {
-        parsedData.push({ ...currentRecord });
-        currentRecord = {};
-      }
-    }
+    });
   }
   
-  // Add the last record if it's valid
-  if (currentRecord.item_name && (currentRecord.purchase_price > 0 || currentRecord.selling_price > 0)) {
-    parsedData.push(currentRecord);
-  }
-  
-  // If no structured data found, try to create a generic record from any price information
+  // If no table data found, try pattern matching
   if (parsedData.length === 0) {
-    const priceMatches = text.match(/[\$₹]?[0-9,]+\.?[0-9]*/g);
-    if (priceMatches && priceMatches.length >= 2) {
+    console.log('[DEBUG] No table found, trying pattern matching');
+    
+    let globalPartyName = '';
+    let currentRecord = {};
+    
+    // Extract global party name first
+    const partyMatch = text.match(/(?:from|supplier|vendor|sold\s*by|dealer)\s*:?\s*([A-Za-z0-9\s&\.,\-]+)(?:\n|address|phone|email|\d{6})/i);
+    if (partyMatch) {
+      globalPartyName = partyMatch[1].trim().split(/\n|address|phone|email/)[0].trim();
+      console.log('[DEBUG] Global party name found:', globalPartyName);
+    }
+    
+    // Pattern matching approach
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      if (!line || line.length < 3) continue;
+      
+      // Try each pattern
+      for (const [key, pattern] of Object.entries(patterns)) {
+        const match = line.match(pattern);
+        if (match && match[1]) {
+          const value = match[1].trim();
+          
+          switch (key) {
+            case 'party':
+              if (!globalPartyName) globalPartyName = value;
+              break;
+            case 'item':
+              if (currentRecord.item_name && Object.keys(currentRecord).length >= 2) {
+                // Save previous record and start new one
+                if (currentRecord.item_name && (currentRecord.purchase_price > 0 || currentRecord.selling_price > 0)) {
+                  parsedData.push({
+                    party_name: globalPartyName || currentRecord.party_name || 'PDF Import',
+                    ...currentRecord,
+                    quantity: currentRecord.quantity || 1,
+                    notes: 'Extracted from PDF patterns'
+                  });
+                }
+                currentRecord = {};
+              }
+              currentRecord.item_name = value;
+              break;
+            case 'purchasePrice':
+              currentRecord.purchase_price = parseFloat(value.replace(/,/g, '')) || 0;
+              break;
+            case 'sellingPrice':
+              currentRecord.selling_price = parseFloat(value.replace(/,/g, '')) || 0;
+              break;
+            case 'quantity':
+              currentRecord.quantity = parseInt(value.replace(/,/g, '')) || 1;
+              break;
+            case 'barcode':
+              currentRecord.barcode = value;
+              break;
+            case 'date':
+              currentRecord.date = value;
+              break;
+            case 'notes':
+              currentRecord.notes = value;
+              break;
+          }
+        }
+      }
+    }
+    
+    // Add the last record
+    if (currentRecord.item_name && (currentRecord.purchase_price > 0 || currentRecord.selling_price > 0)) {
       parsedData.push({
-        party_name: 'PDF Import',
-        item_name: 'Extracted Item',
-        purchase_price: parseFloat(priceMatches[0].replace(/[^\d.]/g, '')) || 0,
-        selling_price: parseFloat(priceMatches[1].replace(/[^\d.]/g, '')) || 0,
-        quantity: 1,
-        notes: 'Extracted from PDF - please verify details'
+        party_name: globalPartyName || currentRecord.party_name || 'PDF Import',
+        ...currentRecord,
+        quantity: currentRecord.quantity || 1,
+        notes: 'Extracted from PDF patterns'
       });
     }
   }
+  
+  // Fallback: Extract any price information
+  if (parsedData.length === 0) {
+    console.log('[DEBUG] No structured data found, trying fallback extraction');
+    
+    const priceMatches = text.match(/[₹$]?\s*[0-9,]+(?:\.[0-9]{1,2})?/g);
+    const itemMatches = text.match(/[A-Za-z][A-Za-z0-9\s]{3,30}(?=\s*[₹$]?[0-9])/g);
+    
+    if (priceMatches && priceMatches.length >= 2 && itemMatches && itemMatches.length > 0) {
+      const cleanPrices = priceMatches.map(p => parseFloat(p.replace(/[^\d.]/g, ''))).filter(p => p > 0);
+      
+      itemMatches.slice(0, Math.min(3, cleanPrices.length)).forEach((item, index) => {
+        if (cleanPrices[index * 2] || cleanPrices[index * 2 + 1]) {
+          parsedData.push({
+            party_name: 'PDF Extraction',
+            item_name: item.trim(),
+            purchase_price: cleanPrices[index * 2] || 0,
+            selling_price: cleanPrices[index * 2 + 1] || cleanPrices[index * 2] || 0,
+            quantity: 1,
+            notes: 'Auto-extracted from PDF - please verify details'
+          });
+        }
+      });
+    }
+  }
+  
+  console.log('[DEBUG] PDF Text Parsing: Extracted', parsedData.length, 'records');
+  parsedData.forEach((record, index) => {
+    console.log(`[DEBUG] Record ${index + 1}:`, record);
+  });
   
   return parsedData;
 }
@@ -1821,8 +1932,16 @@ function parsePDFText(text) {
 // File Upload Modal Component
 function FileUploadModal({ onClose, onFileProcessed }) {
   const [uploading, setUploading] = useState(false);
+  const [uploadingStatus, setUploadingStatus] = useState('');
   const [dragOver, setDragOver] = useState(false);
+  const [processingProgress, setProcessingProgress] = useState(0);
   const fileInputRef = useRef(null);
+  
+  // Reset states when modal opens
+  useEffect(() => {
+    setUploadingStatus('');
+    setProcessingProgress(0);
+  }, []);
 
   const handleFileUpload = async (file) => {
     if (!file) return;
@@ -1835,22 +1954,62 @@ function FileUploadModal({ onClose, onFileProcessed }) {
     }
 
     setUploading(true);
+    setUploadingStatus('Starting file processing...');
+    setProcessingProgress(10);
     
     try {
       let parsedData = [];
 
       if (fileExtension === 'csv') {
         // Parse CSV file
+        setUploadingStatus('Reading CSV file...');
+        setProcessingProgress(30);
+        
         const text = await file.text();
         const Papa = await import('papaparse');
+        
+        setUploadingStatus('Parsing CSV data...');
+        setProcessingProgress(50);
+        
         const result = Papa.parse(text, { header: true, skipEmptyLines: true });
         parsedData = result.data;
+        
+        console.log('[DEBUG] CSV parsing completed, found', parsedData.length, 'rows');
       } else if (fileExtension === 'pdf') {
-        // For now, disable PDF processing due to compatibility issues
-        // but let user know about the potential
-        alert('PDF processing is temporarily disabled. The PDF file you uploaded appears to be an invoice from "Big Daddy Store" with structured data including items like "Astronaut with balloon Mini Diary", quantities, and prices. To import this data:\n\n1. Open the PDF file\n2. Copy the item details manually\n3. Or export to Excel format for better import\n\nThe software has pattern recognition capabilities for most invoice formats.');
-        parsedData = [];
-        return;
+        // Enhanced PDF processing with pdf-parse library
+        try {
+          console.log('[DEBUG] Starting PDF processing for file:', file.name);
+          setUploadingStatus('Reading PDF file...');
+          
+          const arrayBuffer = await file.arrayBuffer();
+          const pdfParse = (await import('pdf-parse')).default;
+          
+          setUploadingStatus('Extracting text from PDF...');
+          const pdfData = await pdfParse(arrayBuffer);
+          
+          console.log('[DEBUG] PDF extracted text length:', pdfData.text.length);
+          console.log('[DEBUG] PDF pages:', pdfData.numpages);
+          
+          if (pdfData.text.length < 50) {
+            throw new Error('PDF appears to be empty or contains mostly images. Please use a text-based PDF or try OCR.');
+          }
+          
+          setUploadingStatus('Analyzing PDF content and extracting data...');
+          parsedData = parsePDFText(pdfData.text);
+          
+          if (parsedData.length === 0) {
+            // Show preview of extracted text for debugging
+            const preview = pdfData.text.substring(0, 500) + (pdfData.text.length > 500 ? '...' : '');
+            throw new Error(`No structured data found in PDF. Here's a preview of the extracted text:\n\n${preview}\n\nPlease ensure your PDF contains:\n1. Clear item names\n2. Price information\n3. Quantity data\n\nOr try converting to CSV/Excel format.`);
+          }
+          
+          console.log('[DEBUG] Successfully parsed', parsedData.length, 'items from PDF');
+          
+        } catch (error) {
+          console.error('[DEBUG] PDF processing error:', error);
+          alert(`PDF Processing Error: ${error.message}`);
+          return;
+        }
       } else {
         // Unsupported file type
         alert('Unsupported file type. Please use CSV files for bulk import or enter data manually.');
@@ -1858,6 +2017,9 @@ function FileUploadModal({ onClose, onFileProcessed }) {
       }
 
       // Process parsed data
+      setUploadingStatus('Processing extracted data...');
+      setProcessingProgress(70);
+      
       const processedPurchases = [];
       const currentDate = new Date().toISOString().split('T')[0];
 
@@ -1921,11 +2083,19 @@ function FileUploadModal({ onClose, onFileProcessed }) {
       }
 
       // Save to database
+      setUploadingStatus('Saving to database...');
+      setProcessingProgress(90);
+      
       const savedPurchases = [];
-      for (const purchase of processedPurchases) {
+      for (let i = 0; i < processedPurchases.length; i++) {
+        const purchase = processedPurchases[i];
         try {
           const savedPurchase = await createPartyPurchase(purchase);
           savedPurchases.push(savedPurchase);
+          
+          // Update progress
+          const progress = 90 + (10 * (i + 1) / processedPurchases.length);
+          setProcessingProgress(Math.round(progress));
         } catch (error) {
           console.error('Error saving purchase:', error);
         }
@@ -1939,6 +2109,8 @@ function FileUploadModal({ onClose, onFileProcessed }) {
       alert('Error processing file. Please check the format and try again.');
     } finally {
       setUploading(false);
+      setUploadingStatus('');
+      setProcessingProgress(0);
     }
   };
 
@@ -1994,8 +2166,20 @@ function FileUploadModal({ onClose, onFileProcessed }) {
             
             {uploading ? (
               <div>
+                <div className="mb-4">
+                  <div className="loading-spinner mx-auto mb-4"></div>
+                </div>
                 <p className="text-lg font-medium text-gray-900 mb-2">Processing file...</p>
-                <p className="text-sm text-gray-500">Please wait while we import your purchases</p>
+                <p className="text-sm text-gray-500 mb-3">{uploadingStatus || 'Please wait while we import your purchases'}</p>
+                
+                {/* Progress Bar */}
+                <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
+                  <div 
+                    className="bg-primary-600 h-2 rounded-full transition-all duration-300 ease-out" 
+                    style={{ width: `${processingProgress}%` }}
+                  ></div>
+                </div>
+                <p className="text-xs text-gray-500 text-center">{processingProgress}%</p>
               </div>
             ) : (
               <div>
@@ -2022,8 +2206,18 @@ function FileUploadModal({ onClose, onFileProcessed }) {
               <li>• <strong>Purchase Date/Date:</strong> Purchase date (optional)</li>
               <li>• <strong>Notes/Description:</strong> Additional notes (optional)</li>
             </ul>
-            <div className="text-xs text-gray-500 bg-blue-50 p-2 rounded">
-              <strong>PDF Support:</strong> For PDF files, the system will automatically extract text and try to identify product information using pattern recognition. Best results with structured documents like invoices or purchase orders.
+            <div className="text-xs text-gray-500 bg-blue-50 p-3 rounded mb-2">
+              <strong>📄 Enhanced PDF Support:</strong> 
+              <ul className="mt-1 space-y-1">
+                <li>• Automatic text extraction from PDF documents</li>
+                <li>• Smart table detection and parsing</li>
+                <li>• Pattern recognition for invoices and purchase orders</li>
+                <li>• Fallback extraction for unstructured PDFs</li>
+                <li>• Works best with text-based PDFs (not scanned images)</li>
+              </ul>
+            </div>
+            <div className="text-xs text-gray-500 bg-amber-50 p-2 rounded">
+              <strong>💡 Tip:</strong> For scanned PDFs or image-based documents, convert to text first or use CSV/Excel format for better results.
             </div>
           </div>
 
