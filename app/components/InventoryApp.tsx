@@ -1165,6 +1165,9 @@ function PartyManagement({ onNavigate }) {
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [selectedPurchase, setSelectedPurchase] = useState(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [selectedItems, setSelectedItems] = useState(new Set());
+  const [selectAll, setSelectAll] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const fileInputRef = useRef(null);
 
   // Fetch party purchases on component mount
@@ -1230,6 +1233,57 @@ function PartyManagement({ onNavigate }) {
     }
   };
 
+  // Handle bulk selection
+  const handleSelectAll = () => {
+    if (selectAll) {
+      setSelectedItems(new Set());
+      setSelectAll(false);
+    } else {
+      const allIds = new Set(filteredPurchases.map(p => p.id));
+      setSelectedItems(allIds);
+      setSelectAll(true);
+    }
+  };
+
+  const handleItemSelect = (itemId: string) => {
+    const newSelected = new Set(selectedItems);
+    if (newSelected.has(itemId)) {
+      newSelected.delete(itemId);
+    } else {
+      newSelected.add(itemId);
+    }
+    setSelectedItems(newSelected);
+    setSelectAll(newSelected.size === filteredPurchases.length);
+  };
+
+  // Handle bulk delete
+  const handleBulkDelete = async () => {
+    if (selectedItems.size === 0) {
+      alert('Please select items to delete.');
+      return;
+    }
+
+    if (!confirm(`Are you sure you want to delete ${selectedItems.size} purchase record(s)? This action cannot be undone.`)) {
+      return;
+    }
+
+    setBulkDeleting(true);
+    try {
+      const deletePromises = Array.from(selectedItems).map(id => deletePartyPurchase(id));
+      await Promise.all(deletePromises);
+      
+      setPartyPurchases(partyPurchases.filter(p => !selectedItems.has(p.id)));
+      setSelectedItems(new Set());
+      setSelectAll(false);
+      alert(`${selectedItems.size} purchase record(s) deleted successfully!`);
+    } catch (error) {
+      console.error('Error deleting purchases:', error);
+      alert('Error deleting purchases: ' + error.message);
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
   return (
     <div className="p-4 sm:p-6 bg-primary-50 min-h-screen">
       {/* Header - Hidden on mobile since it's in nav */}
@@ -1256,18 +1310,54 @@ function PartyManagement({ onNavigate }) {
         </div>
       </div>
 
-      {/* Search */}
+      {/* Search and Bulk Actions */}
       <div className="card mb-6">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search purchases..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="input-field pl-10"
-          />
+        <div className="flex flex-col sm:flex-row gap-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search purchases..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="input-field pl-10"
+            />
+          </div>
+          
+          {/* Bulk Actions */}
+          {selectedItems.size > 0 && (
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-gray-600">
+                {selectedItems.size} selected
+              </span>
+              <button
+                onClick={handleBulkDelete}
+                disabled={bulkDeleting}
+                className="btn-danger text-sm"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                {bulkDeleting ? 'Deleting...' : `Delete ${selectedItems.size}`}
+              </button>
+            </div>
+          )}
         </div>
+        
+        {/* Select All */}
+        {filteredPurchases.length > 0 && (
+          <div className="flex items-center mt-4 pt-4 border-t border-gray-200">
+            <label className="flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={selectAll}
+                onChange={handleSelectAll}
+                className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              />
+              <span className="ml-2 text-sm text-gray-600">
+                Select all ({filteredPurchases.length} items)
+              </span>
+            </label>
+          </div>
+        )}
       </div>
 
       {/* Purchases Grid */}
@@ -1284,9 +1374,17 @@ function PartyManagement({ onNavigate }) {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           {filteredPurchases.map(purchase => (
-            <div key={purchase.id} className="card hover:shadow-md transition-shadow">
+            <div key={purchase.id} className={`card hover:shadow-md transition-shadow ${selectedItems.has(purchase.id) ? 'ring-2 ring-primary-500 bg-primary-25' : ''}`}>
               <div className="flex items-center justify-between mb-4">
-                <span className="badge-info">{purchase.party_name}</span>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={selectedItems.has(purchase.id)}
+                    onChange={() => handleItemSelect(purchase.id)}
+                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                  />
+                  <span className="badge-info">{purchase.party_name}</span>
+                </div>
                 <div className="flex gap-2">
                   <button 
                     onClick={() => {
