@@ -2445,12 +2445,18 @@ function FileUploadModal({ onClose, onFileProcessed }) {
   const [uploadingStatus, setUploadingStatus] = useState('');
   const [dragOver, setDragOver] = useState(false);
   const [processingProgress, setProcessingProgress] = useState(0);
+  const [extractedData, setExtractedData] = useState(null);
+  const [showPreview, setShowPreview] = useState(false);
+  const [editableData, setEditableData] = useState([]);
   const fileInputRef = useRef(null);
   
   // Reset states when modal opens
   useEffect(() => {
     setUploadingStatus('');
     setProcessingProgress(0);
+    setExtractedData(null);
+    setShowPreview(false);
+    setEditableData([]);
   }, []);
   
   // Handle ESC key to close modal
@@ -2763,7 +2769,18 @@ function FileUploadModal({ onClose, onFileProcessed }) {
         return;
       }
 
-      // Save to database
+      // For PDF files, show preview for editing
+      if (fileExtension === 'pdf') {
+        setUploadingStatus('✅ Extraction complete! Review and edit data below...');
+        setProcessingProgress(100);
+        setExtractedData(processedPurchases);
+        setEditableData([...processedPurchases]); // Create editable copy
+        setShowPreview(true);
+        setUploading(false);
+        return;
+      }
+
+      // For CSV/Excel files, save directly to database
       setUploadingStatus('Saving to database...');
       setProcessingProgress(90);
       
@@ -2814,6 +2831,66 @@ function FileUploadModal({ onClose, onFileProcessed }) {
     setDragOver(false);
   };
 
+  // Handle editing extracted data
+  const handleDataEdit = (index, field, value) => {
+    const newData = [...editableData];
+    if (field === 'purchased_quantity' || field === 'remaining_quantity') {
+      // Ensure quantity is a positive integer
+      const numValue = Math.max(0, parseInt(value) || 0);
+      newData[index][field] = numValue;
+      // Keep remaining quantity in sync with purchased quantity
+      if (field === 'purchased_quantity') {
+        newData[index].remaining_quantity = numValue;
+      }
+    } else {
+      newData[index][field] = value;
+    }
+    setEditableData(newData);
+  };
+
+  // Save edited data to database
+  const handleSaveEditedData = async () => {
+    if (editableData.length === 0) return;
+
+    setUploading(true);
+    setUploadingStatus('Saving corrected data to database...');
+    setProcessingProgress(0);
+
+    const savedPurchases = [];
+    for (let i = 0; i < editableData.length; i++) {
+      const purchase = editableData[i];
+      try {
+        const savedPurchase = await createPartyPurchase(purchase);
+        savedPurchases.push(savedPurchase);
+        
+        // Update progress
+        const progress = (100 * (i + 1)) / editableData.length;
+        setProcessingProgress(Math.round(progress));
+      } catch (error) {
+        console.error('Error saving purchase:', error);
+      }
+    }
+
+    onFileProcessed(savedPurchases);
+    alert(`Successfully imported ${savedPurchases.length} purchases after review!`);
+    
+    // Reset states
+    setUploading(false);
+    setShowPreview(false);
+    setExtractedData(null);
+    setEditableData([]);
+    onClose();
+  };
+
+  // Go back to file upload
+  const handleBackToUpload = () => {
+    setShowPreview(false);
+    setExtractedData(null);
+    setEditableData([]);
+    setUploadingStatus('');
+    setProcessingProgress(0);
+  };
+
   return (
     <div 
       className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[9999] overflow-y-auto"
@@ -2824,10 +2901,12 @@ function FileUploadModal({ onClose, onFileProcessed }) {
         }
       }}
     >
-      <div className="bg-white rounded-xl max-w-lg w-full my-8 max-h-[90vh] overflow-y-auto">
+      <div className={`bg-white rounded-xl w-full my-8 max-h-[90vh] overflow-y-auto ${showPreview ? 'max-w-6xl' : 'max-w-lg'}`}>
         <div className="p-6">
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-bold text-gray-900">Upload Purchase File</h2>
+            <h2 className="text-xl font-bold text-gray-900">
+              {showPreview ? `Review PDF Data (${editableData.length} items)` : 'Upload Purchase File'}
+            </h2>
             <button 
               onClick={onClose} 
               disabled={uploading}
@@ -2840,100 +2919,238 @@ function FileUploadModal({ onClose, onFileProcessed }) {
             </button>
           </div>
 
-          {/* File Upload Area */}
-          <div
-            className={`border-2 border-dashed rounded-lg p-8 text-center ${
-              dragOver ? 'border-primary-500 bg-primary-50' : 'border-gray-300'
-            } ${uploading ? 'opacity-50 pointer-events-none' : ''}`}
-            onDrop={handleDrop}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xlsx,.xls,.csv,.pdf"
-              onChange={(e) => handleFileUpload(e.target.files[0])}
-              className="hidden"
-            />
-            
-            <Upload className={`h-12 w-12 mx-auto mb-4 ${dragOver ? 'text-primary-500' : 'text-gray-400'}`} />
-            
-            {uploading ? (
-              <div>
-                <div className="mb-4">
-                  <div className="loading-spinner mx-auto mb-4"></div>
-                </div>
-                <p className="text-lg font-medium text-gray-900 mb-2">Processing file...</p>
-                <p className="text-sm text-gray-500 mb-3">{uploadingStatus || 'Please wait while we import your purchases'}</p>
+          {!showPreview ? (
+            // Upload Interface
+            <div>
+              {/* File Upload Area */}
+              <div
+                className={`border-2 border-dashed rounded-lg p-8 text-center ${
+                  dragOver ? 'border-primary-500 bg-primary-50' : 'border-gray-300'
+                } ${uploading ? 'opacity-50 pointer-events-none' : ''}`}
+                onDrop={handleDrop}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx,.xls,.csv,.pdf"
+                  onChange={(e) => handleFileUpload(e.target.files[0])}
+                  className="hidden"
+                />
                 
-                {/* Progress Bar */}
-                <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
-                  <div 
-                    className="bg-primary-600 h-2 rounded-full transition-all duration-300 ease-out" 
-                    style={{ width: `${processingProgress}%` }}
-                  ></div>
-                </div>
-                <p className="text-xs text-gray-500 text-center">{processingProgress}%</p>
+                <Upload className={`h-12 w-12 mx-auto mb-4 ${dragOver ? 'text-primary-500' : 'text-gray-400'}`} />
+                
+                {uploading ? (
+                  <div>
+                    <div className="mb-4">
+                      <div className="loading-spinner mx-auto mb-4"></div>
+                    </div>
+                    <p className="text-lg font-medium text-gray-900 mb-2">Processing file...</p>
+                    <p className="text-sm text-gray-500 mb-3">{uploadingStatus || 'Please wait while we import your purchases'}</p>
+                    
+                    {/* Progress Bar */}
+                    <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
+                      <div 
+                        className="bg-primary-600 h-2 rounded-full transition-all duration-300 ease-out" 
+                        style={{ width: `${processingProgress}%` }}
+                      ></div>
+                    </div>
+                    <p className="text-xs text-gray-500 text-center">{processingProgress}%</p>
+                  </div>
+                ) : (
+                  <div>
+                    <p className="text-lg font-medium text-gray-900 mb-2">Drop your file here or click to browse</p>
+                    <p className="text-sm text-gray-500 mb-4">Supports Excel (.xlsx, .xls), CSV (.csv), and PDF (.pdf) files</p>
+                    <button className="btn-primary">
+                      Choose File
+                    </button>
+                  </div>
+                )}
               </div>
-            ) : (
-              <div>
-                <p className="text-lg font-medium text-gray-900 mb-2">Drop your file here or click to browse</p>
-                <p className="text-sm text-gray-500 mb-4">Supports Excel (.xlsx, .xls), CSV (.csv), and PDF (.pdf) files</p>
-                <button className="btn-primary">
-                  Choose File
+
+              {/* Expected Format Info */}
+              <div className="mt-6 p-4 bg-primary-50 rounded-lg">
+                <h3 className="font-medium text-gray-900 mb-2">Expected Purchase Document Data:</h3>
+                <p className="text-sm text-gray-600 mb-2">PDF processing focuses on purchase/invoice data with these fields:</p>
+                <ul className="text-sm text-gray-600 space-y-1 mb-3">
+                  <li>• <strong>Supplier/Vendor:</strong> Company name (from invoice header)</li>
+                  <li>• <strong>Item/Product Name:</strong> Product descriptions</li>
+                  <li>• <strong>Unit Price/Rate:</strong> Purchase cost per item</li>
+                  <li>• <strong>Quantity:</strong> Number of units purchased</li>
+                  <li>• <strong>Product Code:</strong> Part numbers, SKUs (optional)</li>
+                  <li>• <strong>Invoice Date:</strong> Purchase date (optional)</li>
+                </ul>
+                <div className="text-xs text-gray-500 bg-blue-50 p-2 rounded">
+                  <strong>💡 Note:</strong> Selling prices are NOT extracted from purchase documents. You'll set your own selling prices when importing items to your product catalog.
+                </div>
+              </div>
+              
+              <div className="mt-4">
+                <div className="text-xs text-gray-500 bg-green-50 p-3 rounded mb-2">
+                  <strong>🚀 Purchase Document Processing - ACTIVE!</strong> 
+                  <ul className="mt-1 space-y-1">
+                    <li>• ✅ Supplier invoice and purchase order processing</li>
+                    <li>• 🧠 Smart table detection for item lists</li>
+                    <li>• 🎯 Purchase price and quantity extraction</li>
+                    <li>• 📊 Multi-page document support (up to 15 pages)</li>
+                    <li>• 🔍 Automatic supplier and item validation</li>
+                    <li>• 💰 Selling prices set by YOU during import</li>
+                  </ul>
+                </div>
+                <div className="text-xs text-gray-500 bg-amber-50 p-2 rounded">
+                  <strong>💡 Tip:</strong> For scanned PDFs or image-based documents, convert to text first or use CSV/Excel format for better results.
+                </div>
+              </div>
+
+              <div className="flex gap-3 mt-6">
+                <button 
+                  onClick={onClose} 
+                  disabled={uploading}
+                  className={`btn-outline flex-1 ${
+                    uploading ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
+                  title={uploading ? 'Cannot cancel while uploading' : ''}
+                >
+                  {uploading ? 'Processing...' : 'Cancel'}
                 </button>
               </div>
-            )}
-          </div>
+            </div>
+          ) : (
+            // Preview Interface for PDF Data
+            <div>
+              {/* Status and Instructions */}
+              <div className="mb-6 p-4 bg-green-50 rounded-lg">
+                <div className="flex items-center mb-2">
+                  <Check className="h-5 w-5 text-green-600 mr-2" />
+                  <p className="font-medium text-green-800">PDF data extracted successfully!</p>
+                </div>
+                <p className="text-sm text-green-700">
+                  Review and edit the extracted data below. Pay special attention to quantities as OCR might have errors.
+                </p>
+              </div>
 
-          {/* Expected Format Info */}
-          <div className="mt-6 p-4 bg-primary-50 rounded-lg">
-            <h3 className="font-medium text-gray-900 mb-2">Expected Purchase Document Data:</h3>
-            <p className="text-sm text-gray-600 mb-2">PDF processing focuses on purchase/invoice data with these fields:</p>
-            <ul className="text-sm text-gray-600 space-y-1 mb-3">
-              <li>• <strong>Supplier/Vendor:</strong> Company name (from invoice header)</li>
-              <li>• <strong>Item/Product Name:</strong> Product descriptions</li>
-              <li>• <strong>Unit Price/Rate:</strong> Purchase cost per item</li>
-              <li>• <strong>Quantity:</strong> Number of units purchased</li>
-              <li>• <strong>Product Code:</strong> Part numbers, SKUs (optional)</li>
-              <li>• <strong>Invoice Date:</strong> Purchase date (optional)</li>
-            </ul>
-            <div className="text-xs text-gray-500 bg-blue-50 p-2 rounded">
-              <strong>💡 Note:</strong> Selling prices are NOT extracted from purchase documents. You'll set your own selling prices when importing items to your product catalog.
-            </div>
-          </div>
-          
-          <div className="mt-4">
-            <div className="text-xs text-gray-500 bg-green-50 p-3 rounded mb-2">
-              <strong>🚀 Purchase Document Processing - ACTIVE!</strong> 
-              <ul className="mt-1 space-y-1">
-                <li>• ✅ Supplier invoice and purchase order processing</li>
-                <li>• 🧠 Smart table detection for item lists</li>
-                <li>• 🎯 Purchase price and quantity extraction</li>
-                <li>• 📊 Multi-page document support (up to 15 pages)</li>
-                <li>• 🔍 Automatic supplier and item validation</li>
-                <li>• 💰 Selling prices set by YOU during import</li>
-              </ul>
-            </div>
-            <div className="text-xs text-gray-500 bg-amber-50 p-2 rounded">
-              <strong>💡 Tip:</strong> For scanned PDFs or image-based documents, convert to text first or use CSV/Excel format for better results.
-            </div>
-          </div>
+              {/* Editable Data Table */}
+              <div className="overflow-x-auto max-h-96 border border-gray-200 rounded-lg">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Supplier</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item Name</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Purchase Price</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Quantity
+                        <span className="text-orange-600 ml-1">⚠️</span>
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Barcode</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {editableData.map((item, index) => (
+                      <tr key={index} className="hover:bg-gray-50">
+                        <td className="px-4 py-3">
+                          <input
+                            type="text"
+                            value={item.party_name}
+                            onChange={(e) => handleDataEdit(index, 'party_name', e.target.value)}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <input
+                            type="text"
+                            value={item.item_name}
+                            onChange={(e) => handleDataEdit(index, 'item_name', e.target.value)}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={item.purchase_price}
+                            onChange={(e) => handleDataEdit(index, 'purchase_price', parseFloat(e.target.value) || 0)}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <input
+                            type="number"
+                            min="0"
+                            value={item.purchased_quantity}
+                            onChange={(e) => handleDataEdit(index, 'purchased_quantity', e.target.value)}
+                            className="w-full px-2 py-1 border-2 border-orange-300 bg-orange-50 rounded text-sm focus:ring-1 focus:ring-orange-500 focus:border-orange-500 font-medium"
+                            title="⚠️ Check this quantity - OCR might have errors"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <input
+                            type="text"
+                            value={item.barcode || ''}
+                            onChange={(e) => handleDataEdit(index, 'barcode', e.target.value)}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
+                            placeholder="Optional"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <input
+                            type="date"
+                            value={item.purchase_date}
+                            onChange={(e) => handleDataEdit(index, 'purchase_date', e.target.value)}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
-          <div className="flex gap-3 mt-6">
-            <button 
-              onClick={onClose} 
-              disabled={uploading}
-              className={`btn-outline flex-1 ${
-                uploading ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
-              title={uploading ? 'Cannot cancel while uploading' : ''}
-            >
-              {uploading ? 'Processing...' : 'Cancel'}
-            </button>
-          </div>
+              {/* Action Buttons */}
+              <div className="flex gap-3 mt-6">
+                <button 
+                  onClick={handleBackToUpload} 
+                  disabled={uploading}
+                  className="btn-outline"
+                >
+                  <ArrowLeft className="h-4 w-4 mr-2" />
+                  Back to Upload
+                </button>
+                <button 
+                  onClick={handleSaveEditedData} 
+                  disabled={uploading || editableData.length === 0}
+                  className="btn-primary flex-1"
+                >
+                  {uploading ? (
+                    <>
+                      <div className="loading-spinner h-4 w-4 mr-2"></div>
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Check className="h-4 w-4 mr-2" />
+                      Save {editableData.length} Items
+                    </>
+                  )}
+                </button>
+              </div>
+              
+              {uploading && (
+                <div className="mt-4">
+                  <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
+                    <div 
+                      className="bg-primary-600 h-2 rounded-full transition-all duration-300 ease-out" 
+                      style={{ width: `${processingProgress}%` }}
+                    ></div>
+                  </div>
+                  <p className="text-sm text-gray-600 text-center">{uploadingStatus}</p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
