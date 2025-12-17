@@ -1,11 +1,25 @@
 import { createClient } from '@supabase/supabase-js'
 import { Database } from './lib/database.types'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error(
+    'CRITICAL ERROR: Supabase environment variables are missing. ' +
+    'Please check your .env.local file or deployment settings (e.g., Vercel Environment Variables). ' +
+    'Required: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY'
+  );
+}
 
 // Create Supabase client
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+// We provide fallback values to prevent the application from crashing immediately on import
+// if the environment variables are missing. This allows the UI to load and show
+// appropriate error messages instead of a blank white screen.
+export const supabase = createClient<Database>(
+  supabaseUrl || 'https://placeholder.supabase.co',
+  supabaseAnonKey || 'placeholder-key',
+  {
   auth: {
     autoRefreshToken: true,
     persistSession: true,
