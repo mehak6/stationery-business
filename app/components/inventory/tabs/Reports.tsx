@@ -43,23 +43,26 @@ export default function Reports({ onNavigate }: ReportsProps) {
   const [startDateDisplay, setStartDateDisplay] = useState('');
   const [endDateDisplay, setEndDateDisplay] = useState(getCurrentDateDisplay());
   const [filterApplied, setFilterApplied] = useState(false);
+  const [isCustomRange, setIsCustomRange] = useState(false);
 
-  const isCurrentYear = financialYear === getFinancialYear();
+  const isCurrentYear = financialYear === getFinancialYear() && !isCustomRange;
 
   useEffect(() => {
-    // Set default date range based on financial year
-    const range = getFYRange(financialYear);
-    setStartDate(range.start);
-    setStartDateDisplay(formatDateToDDMMYYYY(range.start));
-    
-    // For end date, use either the end of FY or today if today is earlier
-    const today = getCurrentDateISO();
-    const effectiveEnd = today < range.end ? today : range.end.split('T')[0];
-    setEndDate(effectiveEnd);
-    setEndDateDisplay(formatDateToDDMMYYYY(effectiveEnd));
+    if (!isCustomRange) {
+      // Set default date range based on financial year
+      const range = getFYRange(financialYear);
+      setStartDate(range.start);
+      setStartDateDisplay(formatDateToDDMMYYYY(range.start));
+      
+      // For end date, use either the end of FY or today if today is earlier
+      const today = getCurrentDateISO();
+      const effectiveEnd = today < range.end ? today : range.end.split('T')[0];
+      setEndDate(effectiveEnd);
+      setEndDateDisplay(formatDateToDDMMYYYY(effectiveEnd));
 
-    fetchReportsData(financialYear);
-  }, [financialYear]);
+      fetchReportsData(financialYear);
+    }
+  }, [financialYear, isCustomRange]);
 
   const fetchReportsData = async (year: string) => {
     try {
@@ -87,9 +90,16 @@ export default function Reports({ onNavigate }: ReportsProps) {
     if (startDate && endDate) {
       try {
         setLoading(true);
-        const filteredSales = await getSalesByDateRange(startDate, endDate);
+        setIsCustomRange(true);
+        const [filteredSales, productsData] = await Promise.all([
+          getSalesByDateRange(startDate, endDate),
+          getProducts()
+        ]);
         setSales(filteredSales || []);
+        setProducts(productsData || []);
         setFilterApplied(true);
+        setStartDateDisplay(formatDateToDDMMYYYY(startDate));
+        setEndDateDisplay(formatDateToDDMMYYYY(endDate));
       } catch (error) {
         console.error('Error applying date filter:', error);
       } finally {
@@ -99,6 +109,7 @@ export default function Reports({ onNavigate }: ReportsProps) {
   };
 
   const clearFilter = async () => {
+    setIsCustomRange(false);
     setFilterApplied(false);
     fetchReportsData(financialYear);
   };
@@ -115,7 +126,7 @@ export default function Reports({ onNavigate }: ReportsProps) {
     });
 
     const reportData = {
-      financial_year: financialYear,
+      report_type: isCustomRange ? 'Custom Range' : `Financial Year ${financialYear}`,
       generated_at: new Date().toISOString(),
       business_summary: {
         total_sales_revenue: totalSalesRevenue,
@@ -149,7 +160,7 @@ export default function Reports({ onNavigate }: ReportsProps) {
     
     const link = document.createElement('a');
     link.href = url;
-    link.download = `business_performance_backup_${financialYear}_${new Date().toISOString().split('T')[0]}.json`;
+    link.download = `business_report_${isCustomRange ? 'custom' : financialYear}_${new Date().toISOString().split('T')[0]}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -164,6 +175,7 @@ export default function Reports({ onNavigate }: ReportsProps) {
   const totalInvestment = totalProductInvestment + totalPartyInvestment;
   const totalSalesRevenue = sales.reduce((sum, s) => sum + s.total_amount, 0);
   const totalProfit = sales.reduce((sum, s) => sum + s.profit, 0);
+  const totalCostOfGoodsSold = totalSalesRevenue - totalProfit;
   const profitMargin = totalSalesRevenue > 0 ? (totalProfit / totalSalesRevenue) * 100 : 0;
   const currentInventoryValue = products.reduce((sum, p) => sum + (p.selling_price * getStockForProduct(p)), 0);
 
@@ -185,193 +197,273 @@ export default function Reports({ onNavigate }: ReportsProps) {
   const avgSaleValue = sales.length > 0 ? totalSalesRevenue / sales.length : 0;
   const totalItemsInInventory = products.reduce((sum, p) => sum + getStockForProduct(p), 0);
 
-  if (loading) return <div className="p-6 text-center">Loading reports...</div>;
+  if (loading) return (
+    <div className="p-12 flex flex-col items-center justify-center min-h-[60vh]">
+      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mb-4"></div>
+      <p className="text-gray-500 font-medium">Analyzing business data...</p>
+    </div>
+  );
 
   return (
     <div className="p-4 sm:p-6 bg-primary-50 min-h-screen">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
-        <div className="flex items-center gap-4">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Yearly Performance</h1>
-            <p className="text-gray-600 mt-2">Business summary for financial year {financialYear}</p>
+      {/* Enhanced Header with Date Controls */}
+      <div className="flex flex-col xl:flex-row xl:items-start justify-between gap-6 mb-8">
+        <div className="flex-1">
+          <h1 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">
+            {isCustomRange ? 'Custom Performance Report' : 'Yearly Performance'}
+          </h1>
+          <p className="text-gray-600 mt-1 font-medium">
+            {isCustomRange 
+              ? `Showing data from ${startDateDisplay} to ${endDateDisplay}`
+              : `Business summary for financial year ${financialYear}`}
+          </p>
+        </div>
+
+        <div className="flex flex-col md:flex-row items-center gap-3 bg-white p-2 rounded-2xl shadow-sm border border-gray-100">
+          {/* FY Selector */}
+          <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-xl border border-gray-100">
+            <Calendar className="h-4 w-4 text-primary-500" />
+            <select 
+              value={financialYear}
+              onChange={(e) => {
+                setFinancialYear(e.target.value);
+                setIsCustomRange(false);
+              }}
+              className="bg-transparent text-sm font-bold text-gray-700 focus:outline-none cursor-pointer"
+            >
+              {getFYList().map(fy => (
+                <option key={fy} value={fy}>{formatFYLabel(fy)}</option>
+              ))}
+            </select>
           </div>
-          <div className="bg-white border-2 border-primary-200 rounded-xl px-4 py-2 flex items-center gap-3 shadow-sm">
-            <Calendar className="h-5 w-5 text-primary-600" />
-            <div className="flex flex-col">
-              <span className="text-[10px] uppercase font-bold text-gray-400 leading-none mb-1">Financial Year</span>
-              <select 
-                value={financialYear}
-                onChange={(e) => setFinancialYear(e.target.value)}
-                className="bg-transparent text-sm font-bold text-primary-900 focus:outline-none cursor-pointer"
-              >
-                {getFYList().map(fy => (
-                  <option key={fy} value={fy}>{formatFYLabel(fy)}</option>
-                ))}
-              </select>
+
+          <div className="h-8 w-[1px] bg-gray-100 hidden md:block"></div>
+
+          {/* Custom Date Range */}
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-xl border border-gray-100">
+              <span className="text-[10px] uppercase font-black text-gray-400">From</span>
+              <input 
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="bg-transparent text-sm font-bold text-gray-700 focus:outline-none"
+              />
             </div>
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-xl border border-gray-100">
+              <span className="text-[10px] uppercase font-black text-gray-400">To</span>
+              <input 
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="bg-transparent text-sm font-bold text-gray-700 focus:outline-none"
+              />
+            </div>
+            <button 
+              onClick={applyDateFilter}
+              className="p-2 bg-primary-600 text-white rounded-xl hover:bg-primary-700 transition-colors shadow-sm"
+              title="Apply Custom Range"
+            >
+              <Filter className="h-4 w-4" />
+            </button>
+            {isCustomRange && (
+              <button 
+                onClick={clearFilter}
+                className="p-2 bg-gray-100 text-gray-500 rounded-xl hover:bg-gray-200 transition-colors"
+                title="Reset to FY"
+              >
+                <AlertCircle className="h-4 w-4" />
+              </button>
+            )}
           </div>
+
+          <div className="h-8 w-[1px] bg-gray-100 hidden md:block"></div>
+
           <button
             onClick={downloadReport}
-            className="btn-primary flex items-center gap-2"
-            title="Download Performance Data"
+            className="flex items-center gap-2 px-4 py-2 bg-primary-50 text-primary-700 font-bold text-sm rounded-xl hover:bg-primary-100 transition-colors"
           >
-            <Download className="h-5 w-5" />
-            <span>Download Report</span>
+            <Download className="h-4 w-4" />
+            <span>Export PDF</span>
           </button>
         </div>
-        {!isCurrentYear && (
-          <div className="mt-4 sm:mt-0 px-4 py-2 bg-orange-100 border border-orange-200 rounded-lg flex items-center gap-2 text-orange-800 text-sm font-medium">
-            <AlertCircle className="h-4 w-4" />
-            Historical Archive View
-          </div>
-        )}
       </div>
 
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Core Metrics Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+          <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-4 opacity-5">
+              <BarChart3 className="h-16 w-16" />
+            </div>
             <div className="flex items-center justify-between mb-3">
               <div className="p-2 bg-blue-50 rounded-lg">
                 <BarChart3 className="h-5 w-5 text-blue-600" />
               </div>
-              <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-full">FY {financialYear}</span>
+              <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-1 rounded-full uppercase tracking-wider">Revenue</span>
             </div>
-            <p className="text-sm font-medium text-gray-500">Total Revenue</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">₹{totalSalesRevenue.toLocaleString('en-IN')}</p>
-            <p className="text-xs text-gray-400 mt-2">Total money from all sales</p>
+            <p className="text-sm font-bold text-gray-400 uppercase tracking-tight">Total Sales</p>
+            <p className="text-3xl font-black text-gray-900 mt-1">₹{totalSalesRevenue.toLocaleString('en-IN')}</p>
+            <div className="flex items-center gap-1 mt-2">
+              <span className="text-xs font-bold text-blue-600">₹{totalCostOfGoodsSold.toLocaleString()}</span>
+              <span className="text-[10px] text-gray-400 font-medium">COGS</span>
+            </div>
           </div>
 
-          <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+          <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-4 opacity-5">
+              <TrendingUp className="h-16 w-16" />
+            </div>
             <div className="flex items-center justify-between mb-3">
               <div className="p-2 bg-green-50 rounded-lg">
                 <TrendingUp className="h-5 w-5 text-green-600" />
               </div>
-              <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded-full">+{profitMargin.toFixed(1)}%</span>
+              <span className="text-[10px] font-black text-green-600 bg-green-50 px-2 py-1 rounded-full">+{profitMargin.toFixed(1)}%</span>
             </div>
-            <p className="text-sm font-medium text-gray-500">Total Net Profit</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">₹{totalProfit.toLocaleString('en-IN')}</p>
-            <p className="text-xs text-gray-400 mt-2">Earnings after purchase costs</p>
+            <p className="text-sm font-bold text-gray-400 uppercase tracking-tight">Net Profit</p>
+            <p className="text-3xl font-black text-green-600 mt-1">₹{totalProfit.toLocaleString('en-IN')}</p>
+            <p className="text-xs text-gray-400 mt-2 font-medium">Earnings after costs</p>
           </div>
 
-          <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+          <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-4 opacity-5">
+              <DollarSign className="h-16 w-16" />
+            </div>
             <div className="flex items-center justify-between mb-3">
               <div className="p-2 bg-orange-50 rounded-lg">
                 <DollarSign className="h-5 w-5 text-orange-600" />
               </div>
+              <span className="text-[10px] font-black text-orange-600 bg-orange-50 px-2 py-1 rounded-full uppercase tracking-wider">Capital</span>
             </div>
-            <p className="text-sm font-medium text-gray-500">Inventory Investment</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">₹{totalInvestment.toLocaleString('en-IN')}</p>
-            <p className="text-xs text-gray-400 mt-2">Cost of unsold stock</p>
+            <p className="text-sm font-bold text-gray-400 uppercase tracking-tight">Stock Investment</p>
+            <p className="text-3xl font-black text-gray-900 mt-1">₹{totalInvestment.toLocaleString('en-IN')}</p>
+            <div className="flex items-center gap-1 mt-2">
+              <span className="text-xs font-bold text-orange-600">{totalItemsInInventory.toLocaleString()}</span>
+              <span className="text-[10px] text-gray-400 font-medium">items in hand</span>
+            </div>
           </div>
 
-          <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+          <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-4 opacity-5">
+              <ShoppingCart className="h-16 w-16" />
+            </div>
             <div className="flex items-center justify-between mb-3">
               <div className="p-2 bg-purple-50 rounded-lg">
                 <ShoppingCart className="h-5 w-5 text-purple-600" />
               </div>
             </div>
-            <p className="text-sm font-medium text-gray-500">Total Items Sold</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">{totalQuantitySold.toLocaleString()}</p>
-            <p className="text-xs text-gray-400 mt-2">Volume across {sales.length} transactions</p>
+            <p className="text-sm font-bold text-gray-400 uppercase tracking-tight">Orders Processed</p>
+            <p className="text-3xl font-black text-gray-900 mt-1">{sales.length.toLocaleString()}</p>
+            <div className="flex items-center gap-1 mt-2">
+              <span className="text-xs font-bold text-purple-600">₹{avgSaleValue.toLocaleString(undefined, {maximumFractionDigits: 0})}</span>
+              <span className="text-[10px] text-gray-400 font-medium">avg per order</span>
+            </div>
           </div>
         </div>
 
         {/* Detailed Performance Summary Section */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-            <h3 className="text-lg font-bold text-gray-900 mb-6 flex items-center gap-2">
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+            <h3 className="text-lg font-black text-gray-900 mb-6 flex items-center gap-2">
               <TrendingUp className="h-5 w-5 text-primary-600" />
               Financial Breakdown
             </h3>
-            <div className="space-y-4">
-              <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
-                <span className="text-gray-600">Total Gross Revenue:</span>
-                <span className="font-bold text-lg">₹{totalSalesRevenue.toLocaleString()}</span>
+            <div className="space-y-3">
+              <div className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl border border-gray-100">
+                <span className="text-gray-500 font-bold text-sm">Gross Sales:</span>
+                <span className="font-black text-lg">₹{totalSalesRevenue.toLocaleString()}</span>
               </div>
-              <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
-                <span className="text-gray-600">Total Net Profit:</span>
-                <span className="font-bold text-lg text-green-600">₹{totalProfit.toLocaleString()}</span>
+              <div className="flex justify-between items-center p-4 bg-green-50/50 rounded-2xl border border-green-100">
+                <span className="text-green-700 font-bold text-sm">Net Profit:</span>
+                <span className="font-black text-xl text-green-700">₹{totalProfit.toLocaleString()}</span>
               </div>
-              <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
-                <span className="text-gray-600">Average Sale Value:</span>
-                <span className="font-bold">₹{avgSaleValue.toLocaleString(undefined, {maximumFractionDigits: 0})}</span>
+              <div className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl border border-gray-100">
+                <span className="text-gray-500 font-bold text-sm">Purchase Costs (COGS):</span>
+                <span className="font-black">₹{totalCostOfGoodsSold.toLocaleString()}</span>
               </div>
-              <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
-                <span className="text-gray-600">Profit Margin:</span>
-                <span className="font-bold text-primary-600">{profitMargin.toFixed(2)}%</span>
+              <div className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl border border-gray-100">
+                <span className="text-gray-500 font-bold text-sm">Profit Margin:</span>
+                <span className="font-black text-primary-600">{profitMargin.toFixed(2)}%</span>
               </div>
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-            <h3 className="text-lg font-bold text-gray-900 mb-6 flex items-center gap-2">
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+            <h3 className="text-lg font-black text-gray-900 mb-6 flex items-center gap-2">
               <BarChart3 className="h-5 w-5 text-primary-600" />
               Inventory Valuation
             </h3>
-            <div className="space-y-4">
-              <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
-                <span className="text-gray-600">Total Current Stock Value:</span>
-                <span className="font-bold text-lg text-blue-600">₹{currentInventoryValue.toLocaleString()}</span>
+            <div className="space-y-3">
+              <div className="flex justify-between items-center p-4 bg-blue-50/50 rounded-2xl border border-blue-100">
+                <span className="text-blue-700 font-bold text-sm">Total Sales Value:</span>
+                <span className="font-black text-xl text-blue-700">₹{currentInventoryValue.toLocaleString()}</span>
               </div>
-              <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
-                <span className="text-gray-600">Total Cost of Stock:</span>
-                <span className="font-bold text-lg">₹{totalInvestment.toLocaleString()}</span>
+              <div className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl border border-gray-100">
+                <span className="text-gray-500 font-bold text-sm">Stock Purchase Cost:</span>
+                <span className="font-black text-lg">₹{totalInvestment.toLocaleString()}</span>
               </div>
-              <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
-                <span className="text-gray-600">Potential Profit in Stock:</span>
-                <span className="font-bold text-green-600">₹{(currentInventoryValue - totalProductInvestment).toLocaleString()}</span>
+              <div className="flex justify-between items-center p-4 bg-green-50/50 rounded-2xl border border-green-100">
+                <span className="text-green-700 font-bold text-sm">Potential Profit:</span>
+                <span className="font-black text-green-700">₹{(currentInventoryValue - totalProductInvestment).toLocaleString()}</span>
               </div>
-              <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
-                <span className="text-gray-600">Total Quantity in Hand:</span>
-                <span className="font-bold">{totalItemsInInventory.toLocaleString()} items</span>
+              <div className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl border border-gray-100">
+                <span className="text-gray-500 font-bold text-sm">Items in Stock:</span>
+                <span className="font-black">{totalItemsInInventory.toLocaleString()} items</span>
               </div>
             </div>
           </div>
         </div>
 
         {/* Period Summary Table */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-bold text-gray-900">Period Overview</h3>
-            <div className="flex gap-2">
-              <div className="text-xs font-bold text-gray-400 bg-gray-100 px-3 py-1.5 rounded-lg border border-gray-200">
-                {startDateDisplay} - {endDateDisplay}
-              </div>
+        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+            <h3 className="text-lg font-black text-gray-900">Performance Summary</h3>
+            <div className="text-[10px] font-black text-primary-600 bg-primary-50 px-4 py-2 rounded-full border border-primary-100 uppercase tracking-widest">
+              Range: {startDateDisplay} to {endDateDisplay}
             </div>
           </div>
           
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead>
-                <tr className="text-gray-400 text-xs uppercase font-bold border-b border-gray-100">
-                  <th className="pb-3 px-2">Performance Metric</th>
-                  <th className="pb-3 px-2 text-right">Value</th>
-                  <th className="pb-3 px-2 text-right">Status</th>
+                <tr className="text-gray-400 text-[10px] uppercase font-black border-b border-gray-100 tracking-tighter">
+                  <th className="pb-4 px-2">Key Metric</th>
+                  <th className="pb-4 px-2 text-right">Value</th>
+                  <th className="pb-4 px-2 text-right">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                <tr className="text-sm">
-                  <td className="py-4 px-2 font-medium text-gray-700">Total Sales Transactions</td>
-                  <td className="py-4 px-2 text-right font-bold">{sales.length}</td>
-                  <td className="py-4 px-2 text-right text-xs font-bold text-green-600 uppercase">Tracked</td>
+                <tr className="text-sm group hover:bg-gray-50 transition-colors">
+                  <td className="py-5 px-2 font-bold text-gray-700">Total Revenue Generated</td>
+                  <td className="py-5 px-2 text-right font-black text-gray-900">₹{totalSalesRevenue.toLocaleString()}</td>
+                  <td className="py-5 px-2 text-right">
+                    <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-1 rounded-lg uppercase">Income</span>
+                  </td>
                 </tr>
-                <tr className="text-sm">
-                  <td className="py-4 px-2 font-medium text-gray-700">Total Profit Generated</td>
-                  <td className="py-4 px-2 text-right font-bold text-green-600">₹{totalProfit.toLocaleString()}</td>
-                  <td className="py-4 px-2 text-right text-xs font-bold text-blue-600 uppercase">Growth</td>
+                <tr className="text-sm group hover:bg-gray-50 transition-colors">
+                  <td className="py-5 px-2 font-bold text-gray-700">Total Profit Earned</td>
+                  <td className="py-5 px-2 text-right font-black text-green-600">₹{totalProfit.toLocaleString()}</td>
+                  <td className="py-5 px-2 text-right">
+                    <span className="text-[10px] font-black text-green-600 bg-green-50 px-2 py-1 rounded-lg uppercase">Net</span>
+                  </td>
                 </tr>
-                <tr className="text-sm">
-                  <td className="py-4 px-2 font-medium text-gray-700">Total Inventory Investment</td>
-                  <td className="py-4 px-2 text-right font-bold text-orange-600">₹{totalInvestment.toLocaleString()}</td>
-                  <td className="py-4 px-2 text-right text-xs font-bold text-orange-600 uppercase">Assets</td>
-                </tr>
-                <tr className="text-sm">
-                  <td className="py-4 px-2 font-medium text-gray-700">Highest Individual Transaction</td>
-                  <td className="py-4 px-2 text-right font-bold">
+                <tr className="text-sm group hover:bg-gray-50 transition-colors">
+                  <td className="py-5 px-2 font-bold text-gray-700">Highest Sale Amount</td>
+                  <td className="py-5 px-2 text-right font-black text-gray-900">
                     ₹{sales.length > 0 ? Math.max(...sales.map(s => s.total_amount)).toLocaleString() : 0}
                   </td>
-                  <td className="py-4 px-2 text-right text-xs font-bold text-purple-600 uppercase">Peak</td>
+                  <td className="py-5 px-2 text-right">
+                    <span className="text-[10px] font-black text-purple-600 bg-purple-50 px-2 py-1 rounded-lg uppercase">Peak</span>
+                  </td>
+                </tr>
+                <tr className="text-sm group hover:bg-gray-50 transition-colors">
+                  <td className="py-5 px-2 font-bold text-gray-700">Average Sale Value</td>
+                  <td className="py-5 px-2 text-right font-black text-gray-900">
+                    ₹{avgSaleValue.toLocaleString(undefined, {maximumFractionDigits: 0})}
+                  </td>
+                  <td className="py-5 px-2 text-right">
+                    <span className="text-[10px] font-black text-orange-600 bg-orange-50 px-2 py-1 rounded-lg uppercase">Average</span>
+                  </td>
                 </tr>
               </tbody>
             </table>
