@@ -175,6 +175,32 @@ export const saveProduct = async (product: Product): Promise<Product> => {
   }
 };
 
+export const bulkSaveProducts = async (products: Product[]): Promise<void> => {
+  try {
+    const db = await getProductsDB();
+    const pouchIds = products.map(p => toPouchID('product', p.id));
+    
+    // Fetch existing docs to get _rev for updates
+    const existing = await db.allDocs({ keys: pouchIds, include_docs: true });
+    const revMap = new Map();
+    existing.rows.forEach((row: any) => {
+      if (row.doc) revMap.set(row.key, row.doc._rev);
+    });
+
+    const docs = products.map(p => {
+      const _id = toPouchID('product', p.id);
+      const doc: any = { ...p, _id };
+      if (revMap.has(_id)) doc._rev = revMap.get(_id);
+      return doc;
+    });
+
+    await db.bulkDocs(docs);
+  } catch (error) {
+    console.error('Error bulk saving products:', error);
+    throw error;
+  }
+};
+
 export const createProduct = async (product: Omit<Product, 'id' | 'created_at' | 'updated_at'>): Promise<Product> => {
   const db = await getProductsDB();
   const id = generateUUID();
@@ -356,6 +382,31 @@ export const saveSale = async (sale: Sale): Promise<Sale> => {
     return sale;
   } catch (error) {
     console.error('Error saving sale:', error);
+    throw error;
+  }
+};
+
+export const bulkSaveSales = async (sales: Sale[]): Promise<void> => {
+  try {
+    const db = await getSalesDB();
+    const pouchIds = sales.map(s => toPouchID('sale', s.id));
+    
+    const existing = await db.allDocs({ keys: pouchIds, include_docs: true });
+    const revMap = new Map();
+    existing.rows.forEach((row: any) => {
+      if (row.doc) revMap.set(row.key, row.doc._rev);
+    });
+
+    const docs = sales.map(s => {
+      const _id = toPouchID('sale', s.id);
+      const doc: any = { ...s, _id };
+      if (revMap.has(_id)) doc._rev = revMap.get(_id);
+      return doc;
+    });
+
+    await db.bulkDocs(docs);
+  } catch (error) {
+    console.error('Error bulk saving sales:', error);
     throw error;
   }
 };
@@ -731,6 +782,31 @@ export const saveCategory = async (category: Category): Promise<Category> => {
   }
 };
 
+export const bulkSaveCategories = async (categories: Category[]): Promise<void> => {
+  try {
+    const db = await getCategoriesDB();
+    const pouchIds = categories.map(c => toPouchID('category', c.id));
+    
+    const existing = await db.allDocs({ keys: pouchIds, include_docs: true });
+    const revMap = new Map();
+    existing.rows.forEach((row: any) => {
+      if (row.doc) revMap.set(row.key, row.doc._rev);
+    });
+
+    const docs = categories.map(c => {
+      const _id = toPouchID('category', c.id);
+      const doc: any = { ...c, _id };
+      if (revMap.has(_id)) doc._rev = revMap.get(_id);
+      return doc;
+    });
+
+    await db.bulkDocs(docs);
+  } catch (error) {
+    console.error('Error bulk saving categories:', error);
+    throw error;
+  }
+};
+
 export const updateCategory = async (id: string, updates: Partial<Category>): Promise<Category | null> => {
   try {
     const db = await getCategoriesDB();
@@ -815,6 +891,31 @@ export const savePartyPurchase = async (purchase: PartyPurchase): Promise<PartyP
     return purchase;
   } catch (error) {
     console.error('Error saving party purchase:', error);
+    throw error;
+  }
+};
+
+export const bulkSavePartyPurchases = async (purchases: PartyPurchase[]): Promise<void> => {
+  try {
+    const db = await getPartyPurchasesDB();
+    const pouchIds = purchases.map(p => toPouchID('party', p.id));
+    
+    const existing = await db.allDocs({ keys: pouchIds, include_docs: true });
+    const revMap = new Map();
+    existing.rows.forEach((row: any) => {
+      if (row.doc) revMap.set(row.key, row.doc._rev);
+    });
+
+    const docs = purchases.map(p => {
+      const _id = toPouchID('party', p.id);
+      const doc: any = { ...p, _id };
+      if (revMap.has(_id)) doc._rev = revMap.get(_id);
+      return doc;
+    });
+
+    await db.bulkDocs(docs);
+  } catch (error) {
+    console.error('Error bulk saving party purchases:', error);
     throw error;
   }
 };

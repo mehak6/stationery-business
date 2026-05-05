@@ -55,7 +55,7 @@ export const syncProducts = async () => {
   let stats = { pull: 0, push: 0, errors: 0 };
 
   try {
-    // 1. PULL changes from Supabase
+    // 1. PULL changes from Supabase (Batch)
     const { data: remoteData, error: pullError } = await (supabase.from('products') as any)
       .select('*')
       .gt('updated_at', meta.last_sync_time);
@@ -63,52 +63,37 @@ export const syncProducts = async () => {
     if (pullError) throw pullError;
 
     if (remoteData && (remoteData as any[]).length > 0) {
-      for (const remote of (remoteData as any[])) {
-        try {
-          const local = await OfflineDB.getProductById(remote.id);
-          
-          if (local && hasConflict(local, remote)) {
-            const resolved = resolveEntityConflict('product', local, remote);
-            await OfflineDB.saveProduct(resolved);
-          } else {
-            await OfflineDB.saveProduct(remote as Product);
-          }
-          stats.pull++;
-        } catch (err) {
-          console.error(`Error syncing product ${remote.id}:`, err);
-          stats.errors++;
+      const remoteItems = remoteData as Product[];
+      // Optimization: Resolve all conflicts in memory before bulk save
+      const localProducts = await OfflineDB.getAllProducts();
+      const localMap = new Map(localProducts.map(p => [p.id, p]));
+      
+      const toSave: Product[] = [];
+      for (const remote of remoteItems) {
+        const local = localMap.get(remote.id);
+        if (local && hasConflict(local, remote)) {
+          const resolved = resolveEntityConflict('product', local, remote);
+          toSave.push(resolved);
+        } else {
+          toSave.push(remote);
         }
       }
+      
+      await OfflineDB.bulkSaveProducts(toSave);
+      stats.pull = toSave.length;
     }
 
-    // 2. PUSH changes to Supabase
-    const localProducts = await OfflineDB.getAllProducts();
-    const toPush = localProducts.filter(p => p.updated_at > meta.last_sync_time);
+    // 2. PUSH changes to Supabase (Batch)
+    const currentLocalProducts = await OfflineDB.getAllProducts();
+    const toPush = currentLocalProducts.filter(p => p.updated_at > meta.last_sync_time);
 
     if (toPush.length > 0) {
-      for (const local of toPush) {
-        try {
-          // Fetch current remote to check for mid-sync conflicts
-          const { data: currentRemote } = await (supabase.from('products') as any)
-            .select('updated_at')
-            .eq('id', local.id)
-            .single();
+      // Bulk upsert to Supabase is much faster than sequential
+      const { error: pushError } = await (supabase.from('products') as any)
+        .upsert(toPush);
 
-          if (currentRemote && (currentRemote as any).updated_at > local.updated_at) {
-            // Remote is newer, skip push and let next pull resolve it
-            continue;
-          }
-
-          const { error: pushError } = await (supabase.from('products') as any)
-            .upsert(local);
-
-          if (pushError) throw pushError;
-          stats.push++;
-        } catch (err) {
-          console.error(`Error pushing product ${local.id}:`, err);
-          stats.errors++;
-        }
-      }
+      if (pushError) throw pushError;
+      stats.push = toPush.length;
     }
 
     await updateSyncMeta('products', syncStartTime);
@@ -128,7 +113,7 @@ export const syncSales = async () => {
   let stats = { pull: 0, push: 0, errors: 0 };
 
   try {
-    // 1. PULL (Sales are mostly immutable, so we just download new ones)
+    // 1. PULL (Batch)
     const { data: remoteData, error: pullError } = await (supabase.from('sales') as any)
       .select('*')
       .gt('created_at', meta.last_sync_time);
@@ -136,13 +121,11 @@ export const syncSales = async () => {
     if (pullError) throw pullError;
 
     if (remoteData && (remoteData as any[]).length > 0) {
-      for (const remote of (remoteData as any[])) {
-        await OfflineDB.saveSale(remote as Sale);
-        stats.pull++;
-      }
+      await OfflineDB.bulkSaveSales(remoteData as Sale[]);
+      stats.pull = (remoteData as any[]).length;
     }
 
-    // 2. PUSH (Offline created sales)
+    // 2. PUSH (Batch)
     const localSales = await OfflineDB.getAllSales();
     const toPush = localSales.filter(s => s.created_at > meta.last_sync_time);
 
@@ -151,7 +134,7 @@ export const syncSales = async () => {
         .upsert(toPush);
 
       if (pushError) throw pushError;
-      stats.push += toPush.length;
+      stats.push = toPush.length;
     }
 
     await updateSyncMeta('sales', syncStartTime);
@@ -171,19 +154,19 @@ export const syncCategories = async () => {
   let stats = { pull: 0, push: 0, errors: 0 };
 
   try {
+    // 1. PULL (Batch)
     const { data: remoteData, error: pullError } = await (supabase.from('categories') as any)
       .select('*')
       .gt('created_at', meta.last_sync_time);
 
     if (pullError) throw pullError;
 
-    if (remoteData) {
-      for (const remote of (remoteData as any[])) {
-        await OfflineDB.saveCategory(remote as Category);
-        stats.pull++;
-      }
+    if (remoteData && (remoteData as any[]).length > 0) {
+      await OfflineDB.bulkSaveCategories(remoteData as Category[]);
+      stats.pull = (remoteData as any[]).length;
     }
 
+    // 2. PUSH (Batch)
     const localCats = await OfflineDB.getAllCategories();
     const toPush = localCats.filter(c => c.created_at > meta.last_sync_time);
 
@@ -191,7 +174,7 @@ export const syncCategories = async () => {
       const { error: pushError } = await (supabase.from('categories') as any)
         .upsert(toPush);
       if (pushError) throw pushError;
-      stats.push += toPush.length;
+      stats.push = toPush.length;
     }
 
     await updateSyncMeta('categories', syncStartTime);
@@ -210,29 +193,34 @@ export const syncPartyPurchases = async () => {
   let stats = { pull: 0, push: 0, errors: 0 };
 
   try {
+    // 1. PULL (Batch)
     const { data: remoteData, error: pullError } = await (supabase.from('party_purchases') as any)
       .select('*')
       .gt('updated_at', meta.last_sync_time);
 
     if (pullError) throw pullError;
 
-    if (remoteData) {
-      for (const remote of (remoteData as any[])) {
-        try {
-          const local = await OfflineDB.getPartyPurchaseById(remote.id);
-          if (local && hasConflict(local, remote)) {
-            const resolved = resolveEntityConflict('party_purchase', local, remote);
-            await OfflineDB.savePartyPurchase(resolved);
-          } else {
-            await OfflineDB.savePartyPurchase(remote as PartyPurchase);
-          }
-          stats.pull++;
-        } catch (err) {
-          stats.errors++;
+    if (remoteData && (remoteData as any[]).length > 0) {
+      const remoteItems = remoteData as PartyPurchase[];
+      const localItems = await OfflineDB.getAllPartyPurchases();
+      const localMap = new Map(localItems.map(p => [p.id, p]));
+      
+      const toSave: PartyPurchase[] = [];
+      for (const remote of remoteItems) {
+        const local = localMap.get(remote.id);
+        if (local && hasConflict(local, remote)) {
+          const resolved = resolveEntityConflict('party_purchase', local, remote);
+          toSave.push(resolved);
+        } else {
+          toSave.push(remote);
         }
       }
+      
+      await OfflineDB.bulkSavePartyPurchases(toSave);
+      stats.pull = toSave.length;
     }
 
+    // 2. PUSH (Batch)
     const localPP = await OfflineDB.getAllPartyPurchases();
     const toPush = localPP.filter(p => p.updated_at > meta.last_sync_time);
 
@@ -240,7 +228,7 @@ export const syncPartyPurchases = async () => {
       const { error: pushError } = await (supabase.from('party_purchases') as any)
         .upsert(toPush);
       if (pushError) throw pushError;
-      stats.push += toPush.length;
+      stats.push = toPush.length;
     }
 
     await updateSyncMeta('party_purchases', syncStartTime);
@@ -255,24 +243,40 @@ export const syncPartyPurchases = async () => {
 
 export const syncDeletions = async () => {
   const pendingDeletions = await OfflineDB.getPendingDeletions();
-  let count = 0;
+  if (pendingDeletions.length === 0) return 0;
 
-  for (const del of pendingDeletions) {
+  // Group deletions by table
+  const byTable: Record<string, any[]> = {};
+  pendingDeletions.forEach(del => {
+    if (!byTable[del.table]) byTable[del.table] = [];
+    byTable[del.table].push(del);
+  });
+
+  let totalCount = 0;
+
+  for (const table of Object.keys(byTable)) {
+    const deletions = byTable[table];
+    const ids = deletions.map(d => d.record_id);
+
     try {
-      const { error } = await (supabase.from(del.table) as any)
+      const { error } = await (supabase.from(table) as any)
         .delete()
-        .eq('id', del.record_id);
+        .in('id', ids);
 
       if (!error) {
-        await OfflineDB.clearDeletion(del);
-        count++;
+        for (const del of deletions) {
+          await OfflineDB.clearDeletion(del);
+        }
+        totalCount += deletions.length;
+      } else {
+        console.error(`Failed to batch sync deletions for ${table}:`, error);
       }
     } catch (err) {
-      console.error(`Failed to sync deletion for ${del.table}:${del.record_id}`, err);
+      console.error(`Exception during batch deletion for ${table}:`, err);
     }
   }
 
-  return count;
+  return totalCount;
 };
 
 // ==================== FULL SYNC ====================
