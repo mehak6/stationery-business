@@ -326,8 +326,16 @@ export const getAllSales = async (limit?: number): Promise<Sale[]> => {
     return result.rows.map(row => {
       const doc: any = row.doc;
       return {
-        ...doc,
-        id: fromPouchID(doc._id)
+        id: fromPouchID(doc._id),
+        product_id: doc.product_id,
+        quantity: doc.quantity,
+        unit_price: doc.unit_price,
+        total_amount: doc.total_amount,
+        profit: doc.profit,
+        customer_info: doc.customer_info,
+        sale_date: doc.sale_date,
+        notes: doc.notes,
+        created_at: doc.created_at
       };
     });
   } catch (error) {

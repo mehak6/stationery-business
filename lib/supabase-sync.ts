@@ -282,31 +282,42 @@ export const syncDeletions = async () => {
 // ==================== FULL SYNC ====================
 
 export const performFullSync = async () => {
-  console.log('Starting full synchronization...');
+  console.log('Starting sequential synchronization...');
   
+  const stats: any = {
+    products: { pull: 0, push: 0, errors: 0 },
+    sales: { pull: 0, push: 0, errors: 0 },
+    categories: { pull: 0, push: 0, errors: 0 },
+    partyPurchases: { pull: 0, push: 0, errors: 0 },
+    deletions: 0,
+    timestamp: new Date().toISOString()
+  };
+
   try {
-    const [products, sales, categories, partyPurchases] = await Promise.all([
-      syncProducts(),
-      syncSales(),
-      syncCategories(),
-      syncPartyPurchases()
-    ]);
+    // 1. Sync Categories first (Dependency for Products)
+    console.log('Syncing categories...');
+    stats.categories = await syncCategories();
 
-    const deletions = await syncDeletions();
+    // 2. Sync Products (Dependency for Sales)
+    console.log('Syncing products...');
+    stats.products = await syncProducts();
 
-    const results = {
-      products,
-      sales,
-      categories,
-      partyPurchases,
-      deletions,
-      timestamp: new Date().toISOString()
-    };
+    // 3. Sync Sales and Party Purchases (Leaf nodes)
+    console.log('Syncing sales...');
+    stats.sales = await syncSales();
 
-    console.log('Sync completed:', results);
-    return results;
-  } catch (err) {
-    console.error('Sync failed:', err);
-    throw err;
+    console.log('Syncing party purchases...');
+    stats.partyPurchases = await syncPartyPurchases();
+
+    // 4. Sync Deletions
+    console.log('Syncing deletions...');
+    stats.deletions = await syncDeletions();
+
+    console.log('Sync completed successfully:', stats);
+    return stats;
+  } catch (err: any) {
+    console.error('Sync failed at some stage:', err);
+    // Return partial stats so UI can see where it failed if needed
+    throw new Error(`Sync failed: ${err.message || 'Unknown error'}`);
   }
 };
