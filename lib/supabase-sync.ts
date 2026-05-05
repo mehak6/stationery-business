@@ -46,25 +46,101 @@ const updateSyncMeta = async (table: string, time: string): Promise<void> => {
   });
 };
 
+/**
+ * Sanitizes an object by removing PouchDB internal fields and ensuring 
+ * only valid schema fields are sent to Supabase.
+ */
+const sanitizeForSupabase = (entity: string, data: any): any => {
+  // Remove PouchDB internals
+  const { _id, _rev, ...cleanData } = data;
+  
+  // Specific table filtering based on Database types
+  switch (entity) {
+    case 'product':
+      return {
+        id: cleanData.id,
+        name: cleanData.name,
+        category_id: cleanData.category_id,
+        barcode: cleanData.barcode,
+        purchase_price: Number(cleanData.purchase_price) || 0,
+        selling_price: Number(cleanData.selling_price) || 0,
+        stock_quantity: Number(cleanData.stock_quantity) || 0,
+        min_stock_level: Number(cleanData.min_stock_level) || 0,
+        supplier_info: cleanData.supplier_info,
+        image_url: cleanData.image_url,
+        description: cleanData.description,
+        created_at: cleanData.created_at,
+        updated_at: cleanData.updated_at
+      };
+    case 'sale':
+      return {
+        id: cleanData.id,
+        product_id: cleanData.product_id,
+        quantity: Number(cleanData.quantity) || 0,
+        unit_price: Number(cleanData.unit_price) || 0,
+        total_amount: Number(cleanData.total_amount) || 0,
+        profit: Number(cleanData.profit) || 0,
+        customer_info: cleanData.customer_info,
+        sale_date: cleanData.sale_date,
+        notes: cleanData.notes,
+        created_at: cleanData.created_at
+      };
+    case 'category':
+      return {
+        id: cleanData.id,
+        name: cleanData.name,
+        description: cleanData.description,
+        created_at: cleanData.created_at
+      };
+    case 'party_purchase':
+      return {
+        id: cleanData.id,
+        party_name: cleanData.party_name,
+        item_name: cleanData.item_name,
+        barcode: cleanData.barcode,
+        purchase_price: Number(cleanData.purchase_price) || 0,
+        selling_price: Number(cleanData.selling_price) || 0,
+        purchased_quantity: Number(cleanData.purchased_quantity) || 0,
+        remaining_quantity: Number(cleanData.remaining_quantity) || 0,
+        purchase_date: cleanData.purchase_date,
+        notes: cleanData.notes,
+        created_at: cleanData.created_at,
+        updated_at: cleanData.updated_at
+      };
+    default:
+      return cleanData;
+  }
+};
+
+const logSupabaseError = (context: string, error: any) => {
+  console.error(`❌ Supabase Error during ${context}:`, {
+    message: error.message,
+    code: error.code,
+    details: error.details,
+    hint: error.hint
+  });
+};
+
 // ==================== PRODUCTS SYNC ====================
 
 export const syncProducts = async () => {
   const meta = await getSyncMeta('products');
   const syncStartTime = new Date().toISOString();
-  
   let stats = { pull: 0, push: 0, errors: 0 };
 
   try {
-    // 1. PULL changes from Supabase (Batch)
+    // 1. PULL changes from Supabase
     const { data: remoteData, error: pullError } = await (supabase.from('products') as any)
       .select('*')
       .gt('updated_at', meta.last_sync_time);
 
-    if (pullError) throw pullError;
+    if (pullError) {
+      logSupabaseError('pull products', pullError);
+      throw pullError;
+    }
 
-    if (remoteData && (remoteData as any[]).length > 0) {
+    if (remoteData && remoteData.length > 0) {
       const remoteItems = remoteData as Product[];
-      // Optimization: Resolve all conflicts in memory before bulk save
       const localProducts = await OfflineDB.getAllProducts();
       const localMap = new Map(localProducts.map(p => [p.id, p]));
       
@@ -83,23 +159,27 @@ export const syncProducts = async () => {
       stats.pull = toSave.length;
     }
 
-    // 2. PUSH changes to Supabase (Batch)
+    // 2. PUSH changes to Supabase
     const currentLocalProducts = await OfflineDB.getAllProducts();
-    const toPush = currentLocalProducts.filter(p => p.updated_at > meta.last_sync_time);
+    const toPush = currentLocalProducts
+      .filter(p => p.updated_at > meta.last_sync_time)
+      .map(p => sanitizeForSupabase('product', p));
 
     if (toPush.length > 0) {
-      // Bulk upsert to Supabase is much faster than sequential
       const { error: pushError } = await (supabase.from('products') as any)
         .upsert(toPush);
 
-      if (pushError) throw pushError;
+      if (pushError) {
+        logSupabaseError('push products', pushError);
+        throw pushError;
+      }
       stats.push = toPush.length;
     }
 
     await updateSyncMeta('products', syncStartTime);
   } catch (err) {
-    console.error('Products sync failed:', err);
     stats.errors++;
+    throw err; // Propagate to stop sequential sync
   }
 
   return stats;
@@ -113,34 +193,42 @@ export const syncSales = async () => {
   let stats = { pull: 0, push: 0, errors: 0 };
 
   try {
-    // 1. PULL (Batch)
+    // 1. PULL
     const { data: remoteData, error: pullError } = await (supabase.from('sales') as any)
       .select('*')
       .gt('created_at', meta.last_sync_time);
 
-    if (pullError) throw pullError;
-
-    if (remoteData && (remoteData as any[]).length > 0) {
-      await OfflineDB.bulkSaveSales(remoteData as Sale[]);
-      stats.pull = (remoteData as any[]).length;
+    if (pullError) {
+      logSupabaseError('pull sales', pullError);
+      throw pullError;
     }
 
-    // 2. PUSH (Batch)
+    if (remoteData && remoteData.length > 0) {
+      await OfflineDB.bulkSaveSales(remoteData as Sale[]);
+      stats.pull = remoteData.length;
+    }
+
+    // 2. PUSH
     const localSales = await OfflineDB.getAllSales();
-    const toPush = localSales.filter(s => s.created_at > meta.last_sync_time);
+    const toPush = localSales
+      .filter(s => s.created_at > meta.last_sync_time)
+      .map(s => sanitizeForSupabase('sale', s));
 
     if (toPush.length > 0) {
       const { error: pushError } = await (supabase.from('sales') as any)
         .upsert(toPush);
 
-      if (pushError) throw pushError;
+      if (pushError) {
+        logSupabaseError('push sales', pushError);
+        throw pushError;
+      }
       stats.push = toPush.length;
     }
 
     await updateSyncMeta('sales', syncStartTime);
   } catch (err) {
-    console.error('Sales sync failed:', err);
     stats.errors++;
+    throw err;
   }
 
   return stats;
@@ -154,33 +242,42 @@ export const syncCategories = async () => {
   let stats = { pull: 0, push: 0, errors: 0 };
 
   try {
-    // 1. PULL (Batch)
+    // 1. PULL
     const { data: remoteData, error: pullError } = await (supabase.from('categories') as any)
       .select('*')
       .gt('created_at', meta.last_sync_time);
 
-    if (pullError) throw pullError;
-
-    if (remoteData && (remoteData as any[]).length > 0) {
-      await OfflineDB.bulkSaveCategories(remoteData as Category[]);
-      stats.pull = (remoteData as any[]).length;
+    if (pullError) {
+      logSupabaseError('pull categories', pullError);
+      throw pullError;
     }
 
-    // 2. PUSH (Batch)
+    if (remoteData && remoteData.length > 0) {
+      await OfflineDB.bulkSaveCategories(remoteData as Category[]);
+      stats.pull = remoteData.length;
+    }
+
+    // 2. PUSH
     const localCats = await OfflineDB.getAllCategories();
-    const toPush = localCats.filter(c => c.created_at > meta.last_sync_time);
+    const toPush = localCats
+      .filter(c => c.created_at > meta.last_sync_time)
+      .map(c => sanitizeForSupabase('category', c));
 
     if (toPush.length > 0) {
       const { error: pushError } = await (supabase.from('categories') as any)
         .upsert(toPush);
-      if (pushError) throw pushError;
+      
+      if (pushError) {
+        logSupabaseError('push categories', pushError);
+        throw pushError;
+      }
       stats.push = toPush.length;
     }
 
     await updateSyncMeta('categories', syncStartTime);
   } catch (err) {
-    console.error('Categories sync failed:', err);
     stats.errors++;
+    throw err;
   }
   return stats;
 };
@@ -193,14 +290,17 @@ export const syncPartyPurchases = async () => {
   let stats = { pull: 0, push: 0, errors: 0 };
 
   try {
-    // 1. PULL (Batch)
+    // 1. PULL
     const { data: remoteData, error: pullError } = await (supabase.from('party_purchases') as any)
       .select('*')
       .gt('updated_at', meta.last_sync_time);
 
-    if (pullError) throw pullError;
+    if (pullError) {
+      logSupabaseError('pull party_purchases', pullError);
+      throw pullError;
+    }
 
-    if (remoteData && (remoteData as any[]).length > 0) {
+    if (remoteData && remoteData.length > 0) {
       const remoteItems = remoteData as PartyPurchase[];
       const localItems = await OfflineDB.getAllPartyPurchases();
       const localMap = new Map(localItems.map(p => [p.id, p]));
@@ -220,21 +320,27 @@ export const syncPartyPurchases = async () => {
       stats.pull = toSave.length;
     }
 
-    // 2. PUSH (Batch)
+    // 2. PUSH
     const localPP = await OfflineDB.getAllPartyPurchases();
-    const toPush = localPP.filter(p => p.updated_at > meta.last_sync_time);
+    const toPush = localPP
+      .filter(p => p.updated_at > meta.last_sync_time)
+      .map(p => sanitizeForSupabase('party_purchase', p));
 
     if (toPush.length > 0) {
       const { error: pushError } = await (supabase.from('party_purchases') as any)
         .upsert(toPush);
-      if (pushError) throw pushError;
+      
+      if (pushError) {
+        logSupabaseError('push party_purchases', pushError);
+        throw pushError;
+      }
       stats.push = toPush.length;
     }
 
     await updateSyncMeta('party_purchases', syncStartTime);
   } catch (err) {
-    console.error('Party purchases sync failed:', err);
     stats.errors++;
+    throw err;
   }
   return stats;
 };
@@ -245,7 +351,6 @@ export const syncDeletions = async () => {
   const pendingDeletions = await OfflineDB.getPendingDeletions();
   if (pendingDeletions.length === 0) return 0;
 
-  // Group deletions by table
   const byTable: Record<string, any[]> = {};
   pendingDeletions.forEach(del => {
     if (!byTable[del.table]) byTable[del.table] = [];
@@ -269,7 +374,7 @@ export const syncDeletions = async () => {
         }
         totalCount += deletions.length;
       } else {
-        console.error(`Failed to batch sync deletions for ${table}:`, error);
+        logSupabaseError(`delete from ${table}`, error);
       }
     } catch (err) {
       console.error(`Exception during batch deletion for ${table}:`, err);
@@ -282,7 +387,7 @@ export const syncDeletions = async () => {
 // ==================== FULL SYNC ====================
 
 export const performFullSync = async () => {
-  console.log('Starting sequential synchronization...');
+  console.log('Starting sequential synchronization with pre-flight checks...');
   
   const stats: any = {
     products: { pull: 0, push: 0, errors: 0 },
@@ -294,15 +399,20 @@ export const performFullSync = async () => {
   };
 
   try {
-    // 1. Sync Categories first (Dependency for Products)
+    // 0. Pre-flight check: Auth session
+    const { data: { session }, error: authError } = await supabase.auth.getSession();
+    if (authError) throw authError;
+    if (!session) throw new Error('No active Supabase session. Please log in again.');
+
+    // 1. Sync Categories first
     console.log('Syncing categories...');
     stats.categories = await syncCategories();
 
-    // 2. Sync Products (Dependency for Sales)
+    // 2. Sync Products
     console.log('Syncing products...');
     stats.products = await syncProducts();
 
-    // 3. Sync Sales and Party Purchases (Leaf nodes)
+    // 3. Sync Sales and Party Purchases
     console.log('Syncing sales...');
     stats.sales = await syncSales();
 
@@ -316,8 +426,7 @@ export const performFullSync = async () => {
     console.log('Sync completed successfully:', stats);
     return stats;
   } catch (err: any) {
-    console.error('Sync failed at some stage:', err);
-    // Return partial stats so UI can see where it failed if needed
-    throw new Error(`Sync failed: ${err.message || 'Unknown error'}`);
+    console.error('Critical sync failure:', err);
+    throw new Error(`Sync failed: ${err.message || 'Check browser console for detailed Supabase error.'}`);
   }
 };
