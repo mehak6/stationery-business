@@ -59,18 +59,18 @@ const sanitizeForSupabase = (entity: string, data: any): any => {
     case 'product':
       return {
         id: cleanData.id,
-        name: cleanData.name,
-        category_id: cleanData.category_id,
-        barcode: cleanData.barcode,
+        name: String(cleanData.name || 'Unnamed Product'),
+        category_id: cleanData.category_id || null,
+        barcode: cleanData.barcode || null,
         purchase_price: Number(cleanData.purchase_price) || 0,
         selling_price: Number(cleanData.selling_price) || 0,
         stock_quantity: Number(cleanData.stock_quantity) || 0,
         min_stock_level: Number(cleanData.min_stock_level) || 0,
-        supplier_info: cleanData.supplier_info,
-        image_url: cleanData.image_url,
-        description: cleanData.description,
-        created_at: cleanData.created_at,
-        updated_at: cleanData.updated_at
+        supplier_info: cleanData.supplier_info || null,
+        image_url: cleanData.image_url || null,
+        description: cleanData.description || null,
+        created_at: cleanData.created_at || new Date().toISOString(),
+        updated_at: cleanData.updated_at || new Date().toISOString()
       };
     case 'sale':
       return {
@@ -80,32 +80,32 @@ const sanitizeForSupabase = (entity: string, data: any): any => {
         unit_price: Number(cleanData.unit_price) || 0,
         total_amount: Number(cleanData.total_amount) || 0,
         profit: Number(cleanData.profit) || 0,
-        customer_info: cleanData.customer_info,
-        sale_date: cleanData.sale_date,
-        notes: cleanData.notes,
-        created_at: cleanData.created_at
+        customer_info: cleanData.customer_info || null,
+        sale_date: cleanData.sale_date || new Date().toISOString(),
+        notes: cleanData.notes || null,
+        created_at: cleanData.created_at || new Date().toISOString()
       };
     case 'category':
       return {
         id: cleanData.id,
-        name: cleanData.name,
-        description: cleanData.description,
-        created_at: cleanData.created_at
+        name: String(cleanData.name || 'Unnamed Category'),
+        description: cleanData.description || null,
+        created_at: cleanData.created_at || new Date().toISOString()
       };
     case 'party_purchase':
       return {
         id: cleanData.id,
-        party_name: cleanData.party_name,
-        item_name: cleanData.item_name,
-        barcode: cleanData.barcode,
+        party_name: String(cleanData.party_name || 'Unknown Party'),
+        item_name: String(cleanData.item_name || 'Unknown Item'),
+        barcode: cleanData.barcode || null,
         purchase_price: Number(cleanData.purchase_price) || 0,
         selling_price: Number(cleanData.selling_price) || 0,
         purchased_quantity: Number(cleanData.purchased_quantity) || 0,
         remaining_quantity: Number(cleanData.remaining_quantity) || 0,
-        purchase_date: cleanData.purchase_date,
-        notes: cleanData.notes,
-        created_at: cleanData.created_at,
-        updated_at: cleanData.updated_at
+        purchase_date: cleanData.purchase_date || new Date().toISOString(),
+        notes: cleanData.notes || null,
+        created_at: cleanData.created_at || new Date().toISOString(),
+        updated_at: cleanData.updated_at || new Date().toISOString()
       };
     default:
       return cleanData;
@@ -119,6 +119,21 @@ const logSupabaseError = (context: string, error: any) => {
     details: error.details,
     hint: error.hint
   });
+};
+
+/**
+ * Helper to perform batched upserts to avoid payload size limits
+ */
+const batchUpsert = async (table: string, data: any[]) => {
+  const CHUNK_SIZE = 50;
+  for (let i = 0; i < data.length; i += CHUNK_SIZE) {
+    const chunk = data.slice(i, i + CHUNK_SIZE);
+    const { error } = await (supabase.from(table) as any).upsert(chunk);
+    if (error) {
+      logSupabaseError(`upsert ${table} (chunk ${i/CHUNK_SIZE})`, error);
+      throw error;
+    }
+  }
 };
 
 // ==================== PRODUCTS SYNC ====================
@@ -166,20 +181,14 @@ export const syncProducts = async () => {
       .map(p => sanitizeForSupabase('product', p));
 
     if (toPush.length > 0) {
-      const { error: pushError } = await (supabase.from('products') as any)
-        .upsert(toPush);
-
-      if (pushError) {
-        logSupabaseError('push products', pushError);
-        throw pushError;
-      }
+      await batchUpsert('products', toPush);
       stats.push = toPush.length;
     }
 
     await updateSyncMeta('products', syncStartTime);
   } catch (err) {
     stats.errors++;
-    throw err; // Propagate to stop sequential sync
+    throw err;
   }
 
   return stats;
@@ -215,13 +224,7 @@ export const syncSales = async () => {
       .map(s => sanitizeForSupabase('sale', s));
 
     if (toPush.length > 0) {
-      const { error: pushError } = await (supabase.from('sales') as any)
-        .upsert(toPush);
-
-      if (pushError) {
-        logSupabaseError('push sales', pushError);
-        throw pushError;
-      }
+      await batchUpsert('sales', toPush);
       stats.push = toPush.length;
     }
 
@@ -264,13 +267,7 @@ export const syncCategories = async () => {
       .map(c => sanitizeForSupabase('category', c));
 
     if (toPush.length > 0) {
-      const { error: pushError } = await (supabase.from('categories') as any)
-        .upsert(toPush);
-      
-      if (pushError) {
-        logSupabaseError('push categories', pushError);
-        throw pushError;
-      }
+      await batchUpsert('categories', toPush);
       stats.push = toPush.length;
     }
 
@@ -327,13 +324,7 @@ export const syncPartyPurchases = async () => {
       .map(p => sanitizeForSupabase('party_purchase', p));
 
     if (toPush.length > 0) {
-      const { error: pushError } = await (supabase.from('party_purchases') as any)
-        .upsert(toPush);
-      
-      if (pushError) {
-        logSupabaseError('push party_purchases', pushError);
-        throw pushError;
-      }
+      await batchUpsert('party_purchases', toPush);
       stats.push = toPush.length;
     }
 
@@ -387,7 +378,7 @@ export const syncDeletions = async () => {
 // ==================== FULL SYNC ====================
 
 export const performFullSync = async () => {
-  console.log('Starting sequential synchronization with pre-flight checks...');
+  console.log('Starting sequential synchronization with pre-flight checks and chunking...');
   
   const stats: any = {
     products: { pull: 0, push: 0, errors: 0 },
