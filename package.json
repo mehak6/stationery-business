@@ -1,6 +1,6 @@
 {
   "name": "stationery-inventory-app",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "private": true,
   "description": "Simple inventory management system for stationery and games",
   "scripts": {
