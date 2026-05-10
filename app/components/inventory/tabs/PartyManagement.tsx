@@ -90,13 +90,32 @@ export default function PartyManagement({ onNavigate }: PartyManagementProps) {
 
   const saveEdit = async (id: string, field: string, val: string) => {
     try {
+      const purchase = partyPurchases.find(p => p.id === id);
+      if (!purchase) return;
+
       let processed: any = val;
-      if (field === 'purchased_quantity') processed = parseInt(val);
-      if (field === 'purchase_price' || field === 'selling_price') processed = parseFloat(val);
-      
-      await updatePartyPurchase(id, { [field]: processed });
-      setPartyPurchases(prev => prev.map(p => p.id === id ? { ...p, [field]: processed } : p));
+      let updates: any = { [field]: processed };
+
+      if (field === 'purchased_quantity') {
+        processed = parseInt(val);
+        if (isNaN(processed)) return;
+        updates[field] = processed;
+        const delta = processed - purchase.purchased_quantity;
+        updates.remaining_quantity = purchase.remaining_quantity + delta;
+      } else if (field === 'purchase_price' || field === 'selling_price') {
+        processed = parseFloat(val);
+        if (isNaN(processed)) return;
+        updates[field] = processed;
+      } else if (field === 'item_name') {
+        processed = val.toUpperCase();
+        updates[field] = processed;
+      }
+
+      await updatePartyPurchase(id, updates);
+      setPartyPurchases(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
       setEditingPurchase(null);
+      setEditingField(null);
+      showToast('Updated successfully', 'success');
     } catch (error) {
       showToast('Error updating', 'error');
     }
@@ -129,22 +148,173 @@ export default function PartyManagement({ onNavigate }: PartyManagementProps) {
           {filteredPurchases.map(purchase => (
             <div key={purchase.id} className="card hover:shadow-md transition-shadow">
               <div className="flex justify-between mb-2">
-                <span className="badge-info">{purchase.party_name}</span>
+                {editingPurchase === purchase.id && editingField === 'party_name' ? (
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="text"
+                      value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') saveEdit(purchase.id, 'party_name', editValue);
+                        if (e.key === 'Escape') setEditingPurchase(null);
+                      }}
+                      className="text-xs px-2 py-1 border-2 border-primary-500 rounded focus:outline-none"
+                      autoFocus
+                    />
+                    <button onClick={() => saveEdit(purchase.id, 'party_name', editValue)} className="text-green-600"><Check className="h-3 w-3" /></button>
+                  </div>
+                ) : (
+                  <span 
+                    className="badge-info cursor-pointer hover:bg-primary-100 flex items-center gap-1"
+                    onClick={() => startEditing(purchase.id, 'party_name', purchase.party_name)}
+                  >
+                    {purchase.party_name}
+                    <Edit className="h-2.5 w-2.5 opacity-50" />
+                  </span>
+                )}
                 <div className="flex gap-2">
                   <button onClick={() => { setSelectedPurchase(purchase); setShowTransferModal(true); }} className="p-1 text-gray-400 hover:text-primary-600" title="Transfer to Shop Inventory"><Package className="h-4 w-4" /></button>
                   <button onClick={() => { setSelectedPurchase(purchase); setShowDeductModal(true); }} className="p-1 text-gray-400 hover:text-orange-600" title="Deduct as Gift/Personal Use"><Gift className="h-4 w-4" /></button>
                   <button onClick={() => handleDeletePurchase(purchase.id)} className="p-1 text-gray-400 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
                 </div>
               </div>
-              <h3 className="font-bold text-gray-900 uppercase">{purchase.item_name}</h3>
-              <p className="text-xs text-gray-500 mb-4">{new Date(purchase.purchase_date).toLocaleDateString()}</p>
+
+              {editingPurchase === purchase.id && editingField === 'item_name' ? (
+                <div className="flex items-center gap-2 mb-1">
+                  <input
+                    type="text"
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') saveEdit(purchase.id, 'item_name', editValue);
+                      if (e.key === 'Escape') setEditingPurchase(null);
+                    }}
+                    className="flex-1 font-bold text-gray-900 uppercase border-2 border-primary-500 rounded px-2 py-1 focus:outline-none"
+                    autoFocus
+                  />
+                  <button onClick={() => saveEdit(purchase.id, 'item_name', editValue)} className="p-1 bg-green-100 text-green-600 rounded"><Check className="h-4 w-4" /></button>
+                  <button onClick={() => setEditingPurchase(null)} className="p-1 bg-gray-100 text-gray-600 rounded"><X className="h-4 w-4" /></button>
+                </div>
+              ) : (
+                <h3 
+                  className="font-bold text-gray-900 uppercase flex items-center gap-2 cursor-pointer group"
+                  onClick={() => startEditing(purchase.id, 'item_name', purchase.item_name)}
+                >
+                  {purchase.item_name}
+                  <Edit className="h-4 w-4 text-gray-300 group-hover:text-primary-500 transition-colors" />
+                </h3>
+              )}
+
+              <div className="flex items-center gap-2 mb-4">
+                <p className="text-xs text-gray-500">{new Date(purchase.purchase_date).toLocaleDateString()}</p>
+                <span className="text-gray-300 text-[10px]">•</span>
+                {editingPurchase === purchase.id && editingField === 'barcode' ? (
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="text"
+                      value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') saveEdit(purchase.id, 'barcode', editValue);
+                        if (e.key === 'Escape') setEditingPurchase(null);
+                      }}
+                      className="text-[10px] px-1 border border-primary-500 rounded focus:outline-none"
+                      autoFocus
+                    />
+                    <button onClick={() => saveEdit(purchase.id, 'barcode', editValue)} className="text-green-600"><Check className="h-2 w-2" /></button>
+                  </div>
+                ) : (
+                  <p 
+                    className="text-[10px] text-gray-400 uppercase cursor-pointer hover:text-primary-500"
+                    onClick={() => startEditing(purchase.id, 'barcode', purchase.barcode || 'NO BARCODE')}
+                  >
+                    Code: {purchase.barcode || 'N/A'}
+                  </p>
+                )}
+              </div>
               
               <div className="space-y-1 text-sm">
-                <div className="flex justify-between">
+                <div className="flex justify-between items-center">
                   <span>Purchased:</span>
-                  <span className="font-medium">{purchase.purchased_quantity} units</span>
+                  {editingPurchase === purchase.id && editingField === 'purchased_quantity' ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') saveEdit(purchase.id, 'purchased_quantity', editValue);
+                          if (e.key === 'Escape') setEditingPurchase(null);
+                        }}
+                        className="w-16 px-1 border-2 border-primary-500 rounded text-right"
+                        autoFocus
+                      />
+                      <button onClick={() => saveEdit(purchase.id, 'purchased_quantity', editValue)} className="text-green-600"><Check className="h-3 w-3" /></button>
+                    </div>
+                  ) : (
+                    <span 
+                      className="font-medium cursor-pointer hover:bg-gray-100 px-1 rounded"
+                      onClick={() => startEditing(purchase.id, 'purchased_quantity', purchase.purchased_quantity)}
+                    >
+                      {purchase.purchased_quantity} units
+                    </span>
+                  )}
                 </div>
-                <div className="flex justify-between">
+                <div className="flex justify-between items-center">
+                  <span>Purchase Price:</span>
+                  {editingPurchase === purchase.id && editingField === 'purchase_price' ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') saveEdit(purchase.id, 'purchase_price', editValue);
+                          if (e.key === 'Escape') setEditingPurchase(null);
+                        }}
+                        className="w-20 px-1 border-2 border-primary-500 rounded text-right"
+                        autoFocus
+                      />
+                      <button onClick={() => saveEdit(purchase.id, 'purchase_price', editValue)} className="text-green-600"><Check className="h-3 w-3" /></button>
+                    </div>
+                  ) : (
+                    <span 
+                      className="font-medium cursor-pointer hover:bg-gray-100 px-1 rounded text-primary-600"
+                      onClick={() => startEditing(purchase.id, 'purchase_price', purchase.purchase_price)}
+                    >
+                      ₹{purchase.purchase_price.toFixed(2)}
+                    </span>
+                  )}
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>Selling Price:</span>
+                  {editingPurchase === purchase.id && editingField === 'selling_price' ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') saveEdit(purchase.id, 'selling_price', editValue);
+                          if (e.key === 'Escape') setEditingPurchase(null);
+                        }}
+                        className="w-20 px-1 border-2 border-primary-500 rounded text-right"
+                        autoFocus
+                      />
+                      <button onClick={() => saveEdit(purchase.id, 'selling_price', editValue)} className="text-green-600"><Check className="h-3 w-3" /></button>
+                    </div>
+                  ) : (
+                    <span 
+                      className="font-medium cursor-pointer hover:bg-gray-100 px-1 rounded text-secondary-600"
+                      onClick={() => startEditing(purchase.id, 'selling_price', purchase.selling_price)}
+                    >
+                      ₹{purchase.selling_price.toFixed(2)}
+                    </span>
+                  )}
+                </div>
+                <div className="flex justify-between items-center">
                   <span>Remaining:</span>
                   <span className={`font-bold ${purchase.remaining_quantity <= 0 ? 'text-red-600' : 'text-accent-600'}`}>{purchase.remaining_quantity} units</span>
                 </div>
