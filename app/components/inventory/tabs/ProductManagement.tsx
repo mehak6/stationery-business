@@ -23,11 +23,13 @@ import {
   createProduct,
   resetAllProductsStock,
   getClosingStockForYear,
-  getSalesByProduct
+  getSalesByProduct,
+  getPartyPurchases,
+  updatePartyPurchase
 } from 'lib/offline-adapter';
 import { addProductHistory, getProductHistory, removeHistoryEntry } from 'lib/product-history';
 import { formatDateToDisplay, parseDisplayDate } from 'lib/date-utils';
-import type { Product, ProductInsert } from 'supabase_client';
+import type { Product, ProductInsert, PartyPurchase } from 'supabase_client';
 import { useToast } from 'app/context/ToastContext';
 
 interface ProductManagementProps {
@@ -1338,17 +1340,55 @@ function AddStockModal({ product, onClose, onStockUpdated }: { product: Product;
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [displayDate, setDisplayDate] = useState(formatDateToDisplay(date));
   const [loading, setLoading] = useState(false);
+  const [partyPurchases, setPartyPurchases] = useState<PartyPurchase[]>([]);
+  const [selectedPartyPurchase, setSelectedPartyPurchase] = useState<PartyPurchase | null>(null);
+  const [isTransferMode, setIsTransferMode] = useState(false);
   const { showToast } = useToast();
+
+  useEffect(() => {
+    const fetchPartyStock = async () => {
+      try {
+        const allPurchases = await getPartyPurchases();
+        const matches = allPurchases
+          .filter(p => p.item_name.toUpperCase() === product.name.toUpperCase() && p.remaining_quantity > 0)
+          .sort((a, b) => new Date(b.purchase_date).getTime() - new Date(a.purchase_date).getTime());
+        
+        setPartyPurchases(matches);
+        if (matches.length > 0) {
+          setSelectedPartyPurchase(matches[0]);
+          setIsTransferMode(true);
+          setQuantity(Math.min(1, matches[0].remaining_quantity));
+        }
+      } catch (error) {
+        console.error('Error fetching party stock:', error);
+      }
+    };
+    fetchPartyStock();
+  }, [product.name]);
 
   const handleAddStock = async () => {
     if (quantity <= 0) return;
+    if (isTransferMode && selectedPartyPurchase && quantity > selectedPartyPurchase.remaining_quantity) {
+      showToast('Cannot transfer more than available party stock', 'error');
+      return;
+    }
+
     setLoading(true);
     try {
       const stockBefore = product.stock_quantity;
       const stockAfter = stockBefore + quantity;
 
+      // 1. Update Product Stock
       await updateProduct(product.id, { stock_quantity: stockAfter });
 
+      // 2. If Transfer Mode, update Party Purchase
+      if (isTransferMode && selectedPartyPurchase) {
+        await updatePartyPurchase(selectedPartyPurchase.id, {
+          remaining_quantity: selectedPartyPurchase.remaining_quantity - quantity
+        });
+      }
+
+      // 3. Add History
       await addProductHistory({
         product_id: product.id,
         product_name: product.name,
@@ -1357,11 +1397,18 @@ function AddStockModal({ product, onClose, onStockUpdated }: { product: Product;
         stock_before: stockBefore,
         stock_after: stockAfter,
         date: date,
-        notes: `Added ${quantity} units manually`
+        notes: isTransferMode && selectedPartyPurchase 
+          ? `Transferred ${quantity} units from ${selectedPartyPurchase.party_name} purchase`
+          : `Added ${quantity} units manually`
       });
 
       onStockUpdated({ ...product, stock_quantity: stockAfter });
-      showToast(`Added ${quantity} units to ${product.name}`, 'success');
+      showToast(
+        isTransferMode 
+          ? `Transferred ${quantity} units from ${selectedPartyPurchase?.party_name}`
+          : `Added ${quantity} units manually to ${product.name}`, 
+        'success'
+      );
     } catch (error) {
       console.error('Error adding stock:', error);
       showToast('Error adding stock', 'error');
@@ -1373,12 +1420,58 @@ function AddStockModal({ product, onClose, onStockUpdated }: { product: Product;
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[9999] backdrop-blur-sm">
       <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl">
-        <h3 className="text-xl font-black text-gray-900 mb-2">Add Stock</h3>
-        <p className="text-sm font-bold text-primary-600 uppercase tracking-widest mb-6">{product.name}</p>
+        <div className="flex justify-between items-start mb-2">
+          <h3 className="text-xl font-black text-gray-900">Add Stock</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="h-6 w-6" /></button>
+        </div>
+        <p className="text-sm font-bold text-primary-600 uppercase tracking-widest mb-4">{product.name}</p>
         
+        {partyPurchases.length > 0 && (
+          <div className={`mb-6 p-4 rounded-xl border-2 transition-all ${isTransferMode ? 'bg-primary-50 border-primary-200' : 'bg-gray-50 border-gray-100 opacity-60'}`}>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[10px] font-black uppercase text-primary-700 tracking-wider">Party Stock Available</span>
+              <button 
+                onClick={() => setIsTransferMode(!isTransferMode)}
+                className={`text-[10px] font-black uppercase px-2 py-1 rounded-md transition-all ${isTransferMode ? 'bg-white text-primary-600 shadow-sm' : 'bg-primary-600 text-white'}`}
+              >
+                {isTransferMode ? 'Switch to Manual' : 'Switch to Transfer'}
+              </button>
+            </div>
+            
+            {isTransferMode ? (
+              <div className="space-y-3">
+                <select 
+                  value={selectedPartyPurchase?.id}
+                  onChange={(e) => {
+                    const found = partyPurchases.find(p => p.id === e.target.value);
+                    if (found) {
+                      setSelectedPartyPurchase(found);
+                      setQuantity(Math.min(quantity, found.remaining_quantity));
+                    }
+                  }}
+                  className="w-full bg-white border border-primary-100 rounded-lg p-2 text-sm font-bold text-primary-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  {partyPurchases.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.party_name} ({p.remaining_quantity} units)
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-primary-600 font-bold italic">
+                  * Deducting from "{selectedPartyPurchase?.party_name}" purchase record.
+                </p>
+              </div>
+            ) : (
+              <p className="text-xs font-bold text-gray-400">Transfer mode disabled. This will be a generic manual stock addition.</p>
+            )}
+          </div>
+        )}
+
         <div className="space-y-4">
           <div>
-            <label className="block text-[10px] uppercase font-black text-gray-400 mb-1 ml-1">Quantity</label>
+            <label className="block text-[10px] uppercase font-black text-gray-400 mb-1 ml-1">
+              {isTransferMode ? 'Quantity to Transfer' : 'Quantity to Add'}
+            </label>
             <div className="flex items-center gap-3">
               <button 
                 onClick={() => setQuantity(Math.max(1, quantity - 1))}
@@ -1389,16 +1482,31 @@ function AddStockModal({ product, onClose, onStockUpdated }: { product: Product;
               <input 
                 type="number" 
                 value={quantity} 
-                onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 0))}
+                onChange={(e) => {
+                  let val = parseInt(e.target.value) || 0;
+                  if (isTransferMode && selectedPartyPurchase) {
+                    val = Math.min(val, selectedPartyPurchase.remaining_quantity);
+                  }
+                  setQuantity(Math.max(1, val));
+                }}
                 className="flex-1 h-12 bg-gray-50 border-2 border-gray-100 rounded-xl text-center font-black text-xl focus:outline-none focus:border-primary-500"
               />
               <button 
-                onClick={() => setQuantity(quantity + 1)}
+                onClick={() => {
+                  let nextVal = quantity + 1;
+                  if (isTransferMode && selectedPartyPurchase) {
+                    nextVal = Math.min(nextVal, selectedPartyPurchase.remaining_quantity);
+                  }
+                  setQuantity(nextVal);
+                }}
                 className="w-12 h-12 flex items-center justify-center rounded-xl bg-gray-100 hover:bg-gray-200 font-black text-xl transition-colors"
               >
                 +
               </button>
             </div>
+            {isTransferMode && selectedPartyPurchase && (
+              <p className="text-[10px] text-right mt-1 font-black text-primary-400 uppercase">Max: {selectedPartyPurchase.remaining_quantity} Units</p>
+            )}
           </div>
 
           <div>
@@ -1430,9 +1538,9 @@ function AddStockModal({ product, onClose, onStockUpdated }: { product: Product;
           <button 
             onClick={handleAddStock}
             disabled={loading}
-            className="flex-1 py-3 px-4 rounded-xl bg-gray-900 text-white font-black hover:bg-gray-800 disabled:opacity-50 shadow-lg shadow-gray-200 transition-all transform active:scale-95"
+            className={`flex-1 py-3 px-4 rounded-xl text-white font-black shadow-lg transition-all transform active:scale-95 disabled:opacity-50 ${isTransferMode ? 'bg-primary-600 hover:bg-primary-700 shadow-primary-100' : 'bg-gray-900 hover:bg-gray-800 shadow-gray-200'}`}
           >
-            {loading ? 'Adding...' : 'Add Now'}
+            {loading ? 'Processing...' : (isTransferMode ? 'Transfer Now' : 'Add Now')}
           </button>
         </div>
       </div>
