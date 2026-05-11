@@ -197,6 +197,18 @@ export default function Reports({ onNavigate }: ReportsProps) {
   const avgSaleValue = sales.length > 0 ? totalSalesRevenue / sales.length : 0;
   const totalItemsInInventory = products.reduce((sum, p) => sum + getStockForProduct(p), 0);
 
+  // Calculate party-wise investment
+  const partyInvestmentMap = partyPurchases.reduce((acc: Record<string, number>, purchase) => {
+    const partyName = purchase.party_name || 'Unknown Party';
+    const investment = purchase.purchase_price * purchase.purchased_quantity;
+    acc[partyName] = (acc[partyName] || 0) + investment;
+    return acc;
+  }, {});
+
+  const partyInvestments = Object.entries(partyInvestmentMap)
+    .map(([name, investment]) => ({ name, investment }))
+    .sort((a, b) => b.investment - a.investment);
+
   if (loading) return (
     <div className="p-12 flex flex-col items-center justify-center min-h-[60vh]">
       <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mb-4"></div>
@@ -467,6 +479,33 @@ export default function Reports({ onNavigate }: ReportsProps) {
                 </tr>
               </tbody>
             </table>
+          </div>
+        </div>
+        {/* Party-Wise Investment Summary */}
+        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+          <h3 className="text-lg font-black text-gray-900 mb-6 flex items-center gap-2">
+            <DollarSign className="h-5 w-5 text-primary-600" />
+            Party-Wise Investment
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {partyInvestments.map(({ name, investment }) => (
+              <div key={name} className="p-4 bg-gray-50 rounded-2xl border border-gray-100 hover:shadow-md transition-all">
+                <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">{name}</p>
+                <p className="text-xl font-black text-gray-900">₹{investment.toLocaleString('en-IN')}</p>
+                <div className="mt-2 w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
+                  <div 
+                    className="bg-primary-600 h-full transition-all duration-500" 
+                    style={{ width: `${(investment / totalInvestment) * 100}%` }}
+                  ></div>
+                </div>
+                <p className="text-[10px] text-gray-400 mt-2 font-bold">
+                  {((investment / totalInvestment) * 100).toFixed(1)}% of total inventory capital
+                </p>
+              </div>
+            ))}
+            {partyInvestments.length === 0 && (
+              <p className="col-span-full text-center py-8 text-gray-400 font-bold italic">No party purchases recorded yet.</p>
+            )}
           </div>
         </div>
       </div>
