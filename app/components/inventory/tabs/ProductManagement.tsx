@@ -58,6 +58,9 @@ export default function ProductManagement({ onNavigate }: ProductManagementProps
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   
   const isCurrentYear = financialYear === '2026-27';
+  const currentMonth = new Date().getMonth(); // 0-indexed
+  const isMarch = currentMonth === 2;
+  const resetStorageKey = `stock_reset_${financialYear}`;
 
   const [undoData, setUndoData] = useState<{
     productId: string;
@@ -105,7 +108,7 @@ export default function ProductManagement({ onNavigate }: ProductManagementProps
         const updatedProducts = products.map(p => ({ ...p, stock_quantity: 0 }));
         setProducts(updatedProducts);
         showToast(`All stock reset to 0 for ${financialYear}. 2025-26 data preserved.`, 'success');
-        localStorage.setItem(`stock_reset_${financialYear}`, 'true');
+        localStorage.setItem(resetStorageKey, 'true');
         setShowResetConfirm(false);
       } else {
         showToast('Failed to reset stock. Please try again.', 'error');
@@ -367,7 +370,7 @@ export default function ProductManagement({ onNavigate }: ProductManagementProps
           </div>
         </div>
 
-        {isCurrentYear && typeof window !== 'undefined' && !localStorage.getItem('stock_reset_2026_27') && new Date() >= new Date('2026-03-20') && (
+        {isCurrentYear && isMarch && typeof window !== 'undefined' && !localStorage.getItem(resetStorageKey) && (
           <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4 animate-in fade-in slide-in-from-top-2 duration-300">
             <div className="flex items-center gap-3">
               <div className="bg-blue-100 p-2 rounded-full">
