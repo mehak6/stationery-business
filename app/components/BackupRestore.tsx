@@ -15,6 +15,7 @@ import {
   BackupData
 } from '../../lib/backup-utils';
 import { createProduct, createSale, createPartyPurchase, getProducts, getSales, getPartyPurchases } from '../../lib/offline-adapter';
+import { performManualSync } from '../../lib/sync-manager';
 
 interface BackupRestoreProps {
   onClose: () => void;
@@ -176,6 +177,20 @@ export default function BackupRestore({ onClose, showToast }: BackupRestoreProps
         `Restored: ${productsRestored} products, ${salesRestored} sales, ${purchasesRestored} purchases`,
         'success'
       );
+
+      try {
+        const syncResult = await performManualSync();
+        if (syncResult.status === 'success') {
+          showToast('Restore synced to cloud database successfully.', 'success');
+        } else if (syncResult.status === 'paused') {
+          showToast('Restore completed locally. Cloud sync paused (Supabase paused).', 'warning');
+        } else {
+          showToast('Restore completed locally, but sync reported errors. Please retry sync.', 'warning');
+        }
+      } catch {
+        showToast('Restore completed locally. Unable to sync now; please sync once online.', 'warning');
+      }
+
       setRestorePreview(null);
 
       // Refresh the page to show restored data
