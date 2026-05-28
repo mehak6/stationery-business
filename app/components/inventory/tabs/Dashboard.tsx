@@ -80,13 +80,13 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   const [actionReason, setActionReason] = useState('');
   const [lastDeletedSale, setLastDeletedSale] = useState<Sale | null>(null);
   const [auditEntries, setAuditEntries] = useState<Array<{ id: string; action: string; reason: string; saleId: string; at: string }>>([]);
-  const [unresolvedConflicts, setUnresolvedConflicts] = useState(0);
+const [unresolvedConflicts, setUnresolvedConflicts] = useState(0);
 
-  const DASHBOARD_CACHE_KEY = 'dashboard_analytics_cache_v2';
-  const DASHBOARD_CACHE_TTL_MS = 15 * 60 * 1000;
-  const DASHBOARD_CACHE_VERSION = 2;
-  const DASHBOARD_AUDIT_KEY = 'dashboard_sales_audit_v1';
-  const CONFLICT_REFRESH_INTERVAL_MS = 10_000;
+const DASHBOARD_CACHE_KEY = 'dashboard_analytics_cache_v2';
+const DASHBOARD_CACHE_TTL_MS = 15 * 60 * 1000;
+const DASHBOARD_CACHE_VERSION = 2;
+const DASHBOARD_AUDIT_KEY = 'dashboard_sales_audit_v1';
+const CONFLICT_REFRESH_INTERVAL_MS = 10_000;
 
   // Fetch dashboard data on component mount
   const fetchDashboardData = async (silent = false) => {
@@ -115,10 +115,10 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       setLowStockItems(lowStock);
       if (typeof window !== 'undefined') {
         localStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify({
-          version: DASHBOARD_CACHE_VERSION,
-          analytics: analyticsData,
-          lowStockItems: lowStock,
-          cachedAt: Date.now(),
+version: DASHBOARD_CACHE_VERSION,
+analytics: analyticsData,
+lowStockItems: lowStock,
+cachedAt: Date.now(),
           updatedAt: new Date().toISOString()
         }));
       }
@@ -137,19 +137,19 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       if (cached) {
         try {
           const parsed = JSON.parse(cached);
-          const cacheVersion = Number(parsed?.version || 1);
-          const cachedAt = Number(parsed?.cachedAt || 0);
-          const isFresh = cachedAt > 0 && (Date.now() - cachedAt) <= DASHBOARD_CACHE_TTL_MS;
-          if (cacheVersion === DASHBOARD_CACHE_VERSION && isFresh) {
-            if (parsed.analytics) setAnalytics(parsed.analytics);
-            if (Array.isArray(parsed.lowStockItems)) setLowStockItems(parsed.lowStockItems);
-            setLoading(false);
-          } else {
-            localStorage.removeItem(DASHBOARD_CACHE_KEY);
-          }
-        } catch (e) {
-          console.warn('Invalid dashboard cache', e);
-          localStorage.removeItem(DASHBOARD_CACHE_KEY);
+const cacheVersion = Number(parsed?.version || 1);
+const cachedAt = Number(parsed?.cachedAt || 0);
+const isFresh = cachedAt > 0 && (Date.now() - cachedAt) <= DASHBOARD_CACHE_TTL_MS;
+if (cacheVersion === DASHBOARD_CACHE_VERSION && isFresh) {
+  if (parsed.analytics) setAnalytics(parsed.analytics);
+  if (Array.isArray(parsed.lowStockItems)) setLowStockItems(parsed.lowStockItems);
+  setLoading(false);
+} else {
+  localStorage.removeItem(DASHBOARD_CACHE_KEY);
+}
+} catch (e) {
+  console.warn('Invalid dashboard cache', e);
+  localStorage.removeItem(DASHBOARD_CACHE_KEY);
         }
       }
       const savedAudit = localStorage.getItem(DASHBOARD_AUDIT_KEY);
@@ -177,14 +177,13 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       }
       return next;
     });
-
-    void logAuditEvent({
-      action,
-      entity_type: 'sale',
-      entity_id: saleId,
-      reason: reason || 'No reason provided',
-      metadata: { source: 'dashboard', at: new Date().toISOString() }
-    });
+void logAuditEvent({
+  action,
+  entity_type: 'sale',
+  entity_id: saleId,
+  reason: reason || 'No reason provided',
+  metadata: { source: 'dashboard', at: new Date().toISOString() }
+});
   };
 
   const handleSyncAndRefresh = async () => {
@@ -428,9 +427,9 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           </div>
         )}
         {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
-        <div className="mt-3 text-sm text-gray-700">
-          Conflict Queue: <strong>{unresolvedConflicts}</strong> unresolved
-        </div>
+<div className="mt-3 text-sm text-gray-700">
+  Conflict Queue: <strong>{unresolvedConflicts}</strong> unresolved
+</div>
       </div>
 
       {/* Analytics Cards */}

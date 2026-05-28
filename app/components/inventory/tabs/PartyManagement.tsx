@@ -109,6 +109,13 @@ export default function PartyManagement({ onNavigate }: PartyManagementProps) {
       } else if (field === 'item_name') {
         processed = val.toUpperCase();
         updates[field] = processed;
+      } else if (field === 'purchase_date') {
+        if (!/^\d{2}\/\d{2}\/\d{4}$/.test(val)) {
+          showToast('Invalid date format (dd/mm/yyyy)', 'error');
+          return;
+        }
+        processed = parseDisplayDate(val);
+        updates[field] = processed;
       }
 
       await updatePartyPurchase(id, updates);
@@ -206,7 +213,31 @@ export default function PartyManagement({ onNavigate }: PartyManagementProps) {
               )}
 
               <div className="flex items-center gap-2 mb-4">
-                <p className="text-xs text-gray-500">{new Date(purchase.purchase_date).toLocaleDateString()}</p>
+                {editingPurchase === purchase.id && editingField === 'purchase_date' ? (
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="text"
+                      value={editValue}
+                      onChange={(e) => setEditValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') saveEdit(purchase.id, 'purchase_date', editValue);
+                        if (e.key === 'Escape') setEditingPurchase(null);
+                      }}
+                      placeholder="dd/mm/yyyy"
+                      className="text-[10px] px-2 py-0.5 border border-primary-500 rounded focus:outline-none w-24"
+                      autoFocus
+                    />
+                    <button onClick={() => saveEdit(purchase.id, 'purchase_date', editValue)} className="text-green-600"><Check className="h-3 w-3" /></button>
+                  </div>
+                ) : (
+                  <p 
+                    className="text-xs text-gray-500 cursor-pointer hover:text-primary-600 flex items-center gap-1"
+                    onClick={() => startEditing(purchase.id, 'purchase_date', formatDateToDisplay(purchase.purchase_date))}
+                  >
+                    <Calendar className="h-3 w-3" />
+                    {formatDateToDisplay(purchase.purchase_date)}
+                  </p>
+                )}
                 <span className="text-gray-300 text-[10px]">•</span>
                 {editingPurchase === purchase.id && editingField === 'barcode' ? (
                   <div className="flex items-center gap-1">
