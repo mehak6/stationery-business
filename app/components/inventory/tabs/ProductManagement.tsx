@@ -72,10 +72,12 @@ export default function ProductManagement({ onNavigate }: ProductManagementProps
   const [isResetting, setIsResetting] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   
-  const currentFinancialYear = getActiveFinancialYear();
-  const isCurrentYear = financialYear === currentFinancialYear;
-  const currentMonthIndex = new Date().getMonth(); // 0-indexed
-  const isMarch = currentMonthIndex === 2;
+const currentFinancialYear = getActiveFinancialYear();
+const isCurrentYear = financialYear === currentFinancialYear;
+const currentMonthIndex = new Date().getMonth(); // 0-indexed
+const isMarch = currentMonthIndex === 2;
+const resetStorageKey = `stock_reset_${financialYear}`;
+  
   const resetStorageKey = `stock_reset_${financialYear}`;
 
   const [undoData, setUndoData] = useState<{
