@@ -35,6 +35,21 @@ const BACKUP_VERSION = '1.1.0';
 const BACKUP_INTERVAL_KEY = 'inventory_pro_backup_interval';
 const LAST_BACKUP_KEY = 'inventory_pro_last_backup';
 
+
+const getActiveFinancialYear = (): string => {
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem('inventory_pro_fy');
+    if (saved && /^\d{4}-\d{2}$/.test(saved)) return saved;
+  }
+
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth(); // 0-indexed
+  const startYear = month >= 3 ? year : year - 1;
+  const endYearShort = String((startYear + 1) % 100).padStart(2, '0');
+  return `${startYear}-${endYearShort}`;
+};
+
 /**
  * Create a backup of all data
  */
@@ -51,7 +66,7 @@ export async function createBackup(
     ]);
 
     // Fetch closing stock for specific year if archive, else for current/last known
-    const targetFY = financialYear || '2025-26';
+    const targetFY = financialYear || getActiveFinancialYear();
     const closingStock = await getClosingStockForYear(targetFY);
 
     // Fetch all history entries
