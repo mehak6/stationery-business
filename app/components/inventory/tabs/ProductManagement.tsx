@@ -36,6 +36,16 @@ interface ProductManagementProps {
   onNavigate: (view: string) => void;
 }
 
+
+const getActiveFinancialYear = (): string => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const startYear = month >= 3 ? year : year - 1;
+  const endYearShort = String((startYear + 1) % 100).padStart(2, '0');
+  return `${startYear}-${endYearShort}`;
+};
+
 export default function ProductManagement({ onNavigate }: ProductManagementProps) {
   const { showToast } = useToast();
   const [products, setProducts] = useState<Product[]>([]);
@@ -52,12 +62,16 @@ export default function ProductManagement({ onNavigate }: ProductManagementProps
   const [editingField, setEditingField] = useState<string | null>(null);
   const [tempValue, setTempValue] = useState('');
   const [saving, setSaving] = useState(false);
-  const [financialYear, setFinancialYear] = useState('2026-27');
+  const [financialYear, setFinancialYear] = useState(getActiveFinancialYear());
   const [historicalStock, setHistoricalStock] = useState<Record<string, number>>({});
   const [isResetting, setIsResetting] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   
-  const isCurrentYear = financialYear === '2026-27';
+  const currentFinancialYear = getActiveFinancialYear();
+  const isCurrentYear = financialYear === currentFinancialYear;
+  const currentMonthIndex = new Date().getMonth(); // 0-indexed
+  const isMarch = currentMonthIndex === 2;
+  const resetStorageKey = `stock_reset_${financialYear}`;
 
   const [undoData, setUndoData] = useState<{
     productId: string;
@@ -105,7 +119,7 @@ export default function ProductManagement({ onNavigate }: ProductManagementProps
         const updatedProducts = products.map(p => ({ ...p, stock_quantity: 0 }));
         setProducts(updatedProducts);
         showToast(`All stock reset to 0 for ${financialYear}. 2025-26 data preserved.`, 'success');
-        localStorage.setItem(`stock_reset_${financialYear}`, 'true');
+        localStorage.setItem(resetStorageKey, 'true');
         setShowResetConfirm(false);
       } else {
         showToast('Failed to reset stock. Please try again.', 'error');
@@ -197,6 +211,53 @@ export default function ProductManagement({ onNavigate }: ProductManagementProps
         [fieldName]: processedValue
       };
 
+      let partyReturnNote = '';
+
+      if (fieldName === 'stock_quantity') {
+        const stockBefore = currentProduct.stock_quantity;
+        const stockAfter = processedValue;
+        const change = stockAfter - stockBefore;
+
+        if (change < 0) {
+          const deductedQuantity = Math.abs(change);
+          const matchingPartyPurchases = (await getPartyPurchases())
+            .filter(p => p.item_name.toUpperCase() === currentProduct.name.toUpperCase())
+            .sort((a, b) => new Date(b.purchase_date).getTime() - new Date(a.purchase_date).getTime());
+
+          if (matchingPartyPurchases.length > 0) {
+            const shouldReturnToParty = window.confirm(
+              `${currentProduct.name} also exists in Party stock.\n\n` +
+              `OK = return ${deductedQuantity} units to Party stock.\n` +
+              `Cancel = remove ${deductedQuantity} units from Product stock only.`
+            );
+
+            if (shouldReturnToParty) {
+              const partyPurchase = matchingPartyPurchases[0];
+              const returnableQuantity = Math.min(
+                deductedQuantity,
+                Math.max(0, partyPurchase.purchased_quantity - partyPurchase.remaining_quantity)
+              );
+
+              if (returnableQuantity > 0) {
+                await updatePartyPurchase(partyPurchase.id, {
+                  remaining_quantity: partyPurchase.remaining_quantity + returnableQuantity
+                });
+                partyReturnNote = ` Returned ${returnableQuantity} units to ${partyPurchase.party_name} party stock.`;
+
+                if (returnableQuantity < deductedQuantity) {
+                  showToast(
+                    `Returned ${returnableQuantity} units to party stock. Remaining ${deductedQuantity - returnableQuantity} units removed from product only.`,
+                    'warning'
+                  );
+                }
+              } else {
+                showToast('Matching party stock is already full, so product stock was reduced only.', 'warning');
+              }
+            }
+          }
+        }
+      }
+
       await updateProduct(productId, updates);
 
       if (fieldName === 'stock_quantity') {
@@ -214,7 +275,7 @@ export default function ProductManagement({ onNavigate }: ProductManagementProps
             stock_after: stockAfter,
             notes: change > 0
               ? `Added ${change} units to stock`
-              : `Reduced stock by ${Math.abs(change)} units`
+              : `Reduced stock by ${Math.abs(change)} units.${partyReturnNote}`
           });
         }
       }
@@ -323,7 +384,7 @@ export default function ProductManagement({ onNavigate }: ProductManagementProps
       {!isCurrentYear && (
         <div className="mb-6 p-4 bg-orange-50 border border-orange-200 rounded-xl flex items-center gap-3 text-orange-800">
           <AlertCircle className="h-5 w-5 shrink-0" />
-          <p className="text-sm">You are viewing <strong>Historical Data</strong> for FY {financialYear}. Records are read-only. Switch to 2026-27 to make changes.</p>
+          <p className="text-sm">You are viewing <strong>Historical Data</strong> for FY {financialYear}. Records are read-only. Switch to {currentFinancialYear} to make changes.</p>
         </div>
       )}
 
@@ -367,7 +428,7 @@ export default function ProductManagement({ onNavigate }: ProductManagementProps
           </div>
         </div>
 
-        {isCurrentYear && typeof window !== 'undefined' && !localStorage.getItem('stock_reset_2026_27') && new Date() >= new Date('2026-03-20') && (
+        {isCurrentYear && isMarch && typeof window !== 'undefined' && !localStorage.getItem(resetStorageKey) && (
           <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-4 animate-in fade-in slide-in-from-top-2 duration-300">
             <div className="flex items-center gap-3">
               <div className="bg-blue-100 p-2 rounded-full">

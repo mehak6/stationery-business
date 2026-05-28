@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import {
   getProducts,
-  getSales,
+  createSale,
   updateSale,
   deleteSale,
   getAnalytics,
@@ -29,6 +29,9 @@ import {
 import { formatDateToDDMMYYYY, parseDDMMYYYYToISO, getCurrentDateISO, getCurrentDateDisplay } from '../utils/dateHelpers';
 import type { Product, Sale } from 'supabase_client';
 import { useToast } from 'app/context/ToastContext';
+import { useSyncStatus } from 'hooks/useSyncStatus';
+import { getUnresolvedConflicts } from 'lib/conflict-resolver';
+import { logAuditEvent } from 'lib/audit-log';
 
 interface DashboardProps {
   onNavigate: (view: string) => void;
@@ -36,6 +39,7 @@ interface DashboardProps {
 
 export default function Dashboard({ onNavigate }: DashboardProps) {
   const { showToast } = useToast();
+  const { syncStatus, lastSyncTime, stats, supabaseStatus, isSyncing, error } = useSyncStatus();
   const [syncing, setSyncing] = useState(false);
   const [analytics, setAnalytics] = useState({
     totalProducts: 0,
@@ -73,6 +77,16 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     sale_date: ''
   });
   const [editSaleDateDisplay, setEditSaleDateDisplay] = useState('');
+  const [actionReason, setActionReason] = useState('');
+  const [lastDeletedSale, setLastDeletedSale] = useState<Sale | null>(null);
+  const [auditEntries, setAuditEntries] = useState<Array<{ id: string; action: string; reason: string; saleId: string; at: string }>>([]);
+  const [unresolvedConflicts, setUnresolvedConflicts] = useState(0);
+
+  const DASHBOARD_CACHE_KEY = 'dashboard_analytics_cache_v2';
+  const DASHBOARD_CACHE_TTL_MS = 15 * 60 * 1000;
+  const DASHBOARD_CACHE_VERSION = 2;
+  const DASHBOARD_AUDIT_KEY = 'dashboard_sales_audit_v1';
+  const CONFLICT_REFRESH_INTERVAL_MS = 10_000;
 
   // Fetch dashboard data on component mount
   const fetchDashboardData = async (silent = false) => {
@@ -99,6 +113,15 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       // Filter low stock items
       const lowStock = (productsData || []).filter(p => p.stock_quantity <= p.min_stock_level);
       setLowStockItems(lowStock);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify({
+          version: DASHBOARD_CACHE_VERSION,
+          analytics: analyticsData,
+          lowStockItems: lowStock,
+          cachedAt: Date.now(),
+          updatedAt: new Date().toISOString()
+        }));
+      }
 
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
@@ -109,8 +132,60 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   };
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const cached = localStorage.getItem(DASHBOARD_CACHE_KEY);
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          const cacheVersion = Number(parsed?.version || 1);
+          const cachedAt = Number(parsed?.cachedAt || 0);
+          const isFresh = cachedAt > 0 && (Date.now() - cachedAt) <= DASHBOARD_CACHE_TTL_MS;
+          if (cacheVersion === DASHBOARD_CACHE_VERSION && isFresh) {
+            if (parsed.analytics) setAnalytics(parsed.analytics);
+            if (Array.isArray(parsed.lowStockItems)) setLowStockItems(parsed.lowStockItems);
+            setLoading(false);
+          } else {
+            localStorage.removeItem(DASHBOARD_CACHE_KEY);
+          }
+        } catch (e) {
+          console.warn('Invalid dashboard cache', e);
+          localStorage.removeItem(DASHBOARD_CACHE_KEY);
+        }
+      }
+      const savedAudit = localStorage.getItem(DASHBOARD_AUDIT_KEY);
+      if (savedAudit) {
+        try {
+          setAuditEntries(JSON.parse(savedAudit));
+        } catch {
+          setAuditEntries([]);
+        }
+      }
+    }
     fetchDashboardData();
+    const refreshConflicts = () => setUnresolvedConflicts(getUnresolvedConflicts().length);
+    refreshConflicts();
+    const interval = setInterval(refreshConflicts, CONFLICT_REFRESH_INTERVAL_MS);
+    return () => clearInterval(interval);
   }, []);
+
+  const addAuditEntry = (action: string, saleId: string, reason: string) => {
+    const entry = { id: `${Date.now()}-${saleId}`, action, reason: reason || 'No reason provided', saleId, at: new Date().toISOString() };
+    setAuditEntries(prev => {
+      const next = [entry, ...prev].slice(0, 20);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(DASHBOARD_AUDIT_KEY, JSON.stringify(next));
+      }
+      return next;
+    });
+
+    void logAuditEvent({
+      action,
+      entity_type: 'sale',
+      entity_id: saleId,
+      reason: reason || 'No reason provided',
+      metadata: { source: 'dashboard', at: new Date().toISOString() }
+    });
+  };
 
   const handleSyncAndRefresh = async () => {
     try {
@@ -181,6 +256,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       };
 
       await updateSale(editingSale.id, updates);
+      addAuditEntry('edit_sale', editingSale.id, actionReason);
       await fetchDashboardData(true);
 
       if (showAllSales) {
@@ -189,6 +265,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
 
       showToast(`Sale updated successfully`, 'success');
       setEditingSale(null);
+      setActionReason('');
 
     } catch (error) {
       console.error('Error updating sale:', error);
@@ -196,7 +273,12 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     }
   };
 
-  const handleDeleteSale = async (saleId: string, saleData: any) => {
+  const handleDeleteSale = async (saleId: string, saleData: Sale) => {
+    const reason = prompt('Reason for deleting this sale? (required for audit)');
+    if (!reason || !reason.trim()) {
+      showToast('Delete reason is required', 'warning');
+      return;
+    }
     if (!confirm(`Are you sure you want to delete this sale?`)) {
       return;
     }
@@ -207,7 +289,8 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         showToast('Failed to delete sale', 'error');
         return;
       }
-
+      setLastDeletedSale(saleData);
+      addAuditEntry('delete_sale', saleId, reason.trim());
       await fetchDashboardData(true);
       if (showAllSales) {
         await fetchAllSales(allSalesPage);
@@ -216,6 +299,29 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     } catch (error) {
       console.error('Error deleting sale:', error);
       showToast('Error deleting sale.', 'error');
+    }
+  };
+
+  const handleUndoLastDelete = async () => {
+    if (!lastDeletedSale) return;
+    try {
+      await createSale({
+        product_id: lastDeletedSale.product_id,
+        quantity: lastDeletedSale.quantity,
+        unit_price: lastDeletedSale.unit_price,
+        total_amount: lastDeletedSale.total_amount,
+        profit: lastDeletedSale.profit,
+        sale_date: lastDeletedSale.sale_date,
+        notes: 'Restored from undo delete action'
+      });
+      addAuditEntry('undo_delete_sale', lastDeletedSale.id, 'Restored recently deleted sale');
+      setLastDeletedSale(null);
+      await fetchDashboardData(true);
+      if (showAllSales) await fetchAllSales(allSalesPage);
+      showToast('Last deleted sale restored', 'success');
+    } catch (e) {
+      console.error('Undo delete failed', e);
+      showToast('Unable to restore deleted sale', 'error');
     }
   };
 
@@ -270,7 +376,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     await fetchAllSales(newPage);
   };
 
-  if (loading && !showAllSales) {
+  if (loading && !showAllSales && analytics.totalProducts === 0 && analytics.totalSales === 0) {
     return (
       <div className="p-6 text-center">
         <div className="animate-spin h-10 w-10 border-4 border-primary-500 border-t-transparent rounded-full mx-auto mb-4"></div>
@@ -299,6 +405,32 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           <RefreshCw className={`h-5 w-5 ${syncing ? 'animate-spin' : ''}`} />
           {syncing ? 'Refreshing...' : 'Sync & Refresh'}
         </button>
+      </div>
+
+      {/* Sync Health */}
+      <div className="mb-6 bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase font-bold text-gray-500">Sync Health</p>
+            <p className="text-sm font-semibold text-gray-900">
+              Last Sync: {lastSyncTime ? new Date(lastSyncTime).toLocaleString() : 'Not synced yet'}
+            </p>
+          </div>
+          <div className="text-sm text-gray-700">
+            <span className="mr-4">Pending: {stats.isQueued ? 1 : 0}</span>
+            <span className="mr-4">Failed: {stats.totalErrors}</span>
+            <span>Status: {isSyncing ? 'Retrying / Syncing' : syncStatus}</span>
+          </div>
+        </div>
+        {supabaseStatus === 'paused' && (
+          <div className="mt-3 text-sm font-semibold text-orange-700 bg-orange-50 border border-orange-200 rounded-xl p-2">
+            Sync is paused because Supabase project is paused. Resume project to save cloud updates.
+          </div>
+        )}
+        {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
+        <div className="mt-3 text-sm text-gray-700">
+          Conflict Queue: <strong>{unresolvedConflicts}</strong> unresolved
+        </div>
       </div>
 
       {/* Analytics Cards */}
@@ -339,6 +471,12 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           </div>
         </div>
       </div>
+      {lastDeletedSale && (
+        <div className="mb-4 bg-yellow-50 border border-yellow-200 rounded-xl p-3 flex items-center justify-between">
+          <p className="text-sm text-yellow-800 font-medium">Sale deleted. You can undo this action.</p>
+          <button onClick={handleUndoLastDelete} className="px-3 py-1.5 text-sm font-bold bg-yellow-200 hover:bg-yellow-300 rounded-lg">Undo Last Sale Delete</button>
+        </div>
+      )}
 
       {/* Low Stock Alerts */}
       {lowStockItems.length > 0 && (
@@ -667,9 +805,9 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
                 <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-1.5 ml-1">
                   Sale Date
                 </label>
-                <input
-                  type="text"
-                  value={editSaleDateDisplay}
+                  <input
+                    type="text"
+                    value={editSaleDateDisplay}
                   onChange={(e) => {
                     const value = e.target.value;
                     if (/^\d{0,2}\/?\d{0,2}\/?\d{0,4}$/.test(value)) {
@@ -684,6 +822,18 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
                   placeholder="dd/mm/yyyy"
                   className="input-field w-full font-bold"
                   maxLength={10}
+                  />
+              </div>
+              <div>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-1.5 ml-1">
+                  Edit Reason (for audit)
+                </label>
+                <input
+                  type="text"
+                  value={actionReason}
+                  onChange={(e) => setActionReason(e.target.value)}
+                  placeholder="e.g. Wrong quantity entered"
+                  className="input-field w-full font-bold"
                 />
               </div>
 
@@ -711,12 +861,25 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
                 </button>
                 <button
                   onClick={handleUpdateSale}
+                  disabled={!actionReason.trim()}
                   className="flex-1 bg-primary-600 text-white py-4 rounded-[20px] font-black hover:bg-primary-700 transition-all shadow-lg active:scale-95"
                 >
                   Save Changes
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+      {auditEntries.length > 0 && (
+        <div className="mt-8 bg-white border border-gray-100 rounded-2xl p-4 shadow-sm">
+          <p className="text-sm font-bold text-gray-900 mb-2">Recent audit trail</p>
+          <div className="space-y-1">
+            {auditEntries.slice(0, 5).map((entry) => (
+              <p key={entry.id} className="text-xs text-gray-600">
+                {new Date(entry.at).toLocaleString()} • {entry.action} • {entry.reason}
+              </p>
+            ))}
           </div>
         </div>
       )}
