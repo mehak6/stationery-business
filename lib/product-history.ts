@@ -19,7 +19,9 @@ export interface ProductHistoryEntry {
   notes?: string;
 }
 
-export const addProductHistory = async (historyEntry: Omit<ProductHistoryEntry, 'id'>): Promise<void> => {
+type ProductHistoryCreateEntry = Omit<ProductHistoryEntry, 'id' | 'date'> & Partial<Pick<ProductHistoryEntry, 'date'>>;
+
+export const addProductHistory = async (historyEntry: ProductHistoryCreateEntry): Promise<void> => {
   try {
     const entry: ProductHistoryEntry = {
       id: `history_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -34,7 +36,7 @@ export const addProductHistory = async (historyEntry: Omit<ProductHistoryEntry, 
   }
 };
 
-export const addProductHistoryBulk = async (historyEntries: Omit<ProductHistoryEntry, 'id'>[]): Promise<void> => {
+export const addProductHistoryBulk = async (historyEntries: ProductHistoryCreateEntry[]): Promise<void> => {
   try {
     const now = new Date().toISOString();
     const entries: ProductHistoryEntry[] = historyEntries.map((he, index) => ({

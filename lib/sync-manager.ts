@@ -187,6 +187,7 @@ const syncWithRetry = async (
       };
 
       lastSyncResult = result;
+      await saveLastSyncResult(result);
       notifyListeners(result);
       return result;
     }
