@@ -181,8 +181,34 @@ export const syncProducts = async () => {
       .map(p => sanitizeForSupabase('product', p));
 
     if (toPush.length > 0) {
-      await batchUpsert('products', toPush);
-      stats.push = toPush.length;
+      try {
+        await batchUpsert('products', toPush);
+        stats.push = toPush.length;
+      } catch (chunkError) {
+        console.warn('Batch upsert for products failed, retrying row-by-row to isolate invalid records.', chunkError);
+
+        let pushed = 0;
+        let rowErrors = 0;
+
+        for (const row of toPush) {
+          const { error } = await (supabase.from('products') as any).upsert([row]);
+          if (error) {
+            rowErrors++;
+            console.error('Skipped invalid product row during sync:', {
+              id: row?.id,
+              name: row?.name,
+              stock_quantity: row?.stock_quantity,
+              min_stock_level: row?.min_stock_level,
+              error: error.message
+            });
+            continue;
+          }
+          pushed++;
+        }
+
+        stats.push = pushed;
+        stats.errors += rowErrors;
+      }
     }
 
     await updateSyncMeta('products', syncStartTime);
