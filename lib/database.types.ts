@@ -143,6 +143,7 @@ export interface Database {
           sale_date: string
           notes: string | null
           created_at: string
+          updated_at: string
         }
         Insert: {
           id?: string
@@ -155,6 +156,7 @@ export interface Database {
           sale_date?: string
           notes?: string | null
           created_at?: string
+          updated_at?: string
         }
         Update: {
           id?: string
@@ -167,6 +169,7 @@ export interface Database {
           sale_date?: string
           notes?: string | null
           created_at?: string
+          updated_at?: string
         }
       }
       party_purchases: {

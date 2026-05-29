@@ -5,6 +5,8 @@ DECLARE
     v_diff INTEGER;
     v_stock INTEGER;
 BEGIN
+    NEW.updated_at = NOW();
+
     -- Calculate quantity difference (new - old)
     v_diff := NEW.quantity - OLD.quantity;
 
@@ -42,6 +44,6 @@ $$ LANGUAGE plpgsql;
 -- Trigger for sale update
 DROP TRIGGER IF EXISTS trigger_update_stock_after_sale_update ON sales;
 CREATE TRIGGER trigger_update_stock_after_sale_update
-    AFTER UPDATE ON sales
+    BEFORE UPDATE ON sales
     FOR EACH ROW
     EXECUTE FUNCTION update_product_stock_after_sale_update();

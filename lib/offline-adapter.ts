@@ -418,6 +418,86 @@ export const getSalesByDateRange = async (startDate: string, endDate: string): P
   }
 };
 
+const getSaleIdFromRpcResult = (data: any): string | null => {
+  if (!data || typeof data !== 'object') return null;
+  return data.sale_id || data.id || null;
+};
+
+const buildSaleFromInsert = (id: string, sale: SaleInsert): Sale => {
+  const now = new Date().toISOString();
+  return {
+    id,
+    product_id: sale.product_id,
+    quantity: sale.quantity,
+    unit_price: sale.unit_price,
+    total_amount: sale.total_amount,
+    profit: sale.profit,
+    customer_info: sale.customer_info ?? null,
+    sale_date: sale.sale_date ?? now.split('T')[0],
+    notes: sale.notes ?? null,
+    created_at: now,
+    updated_at: now
+  } as Sale;
+};
+
+const cacheProductAfterRemoteStockChange = async (
+  productId: string,
+  fallbackStockQuantity?: number
+): Promise<void> => {
+  try {
+    const { data, error } = await (supabase.from('products') as any)
+      .select('*')
+      .eq('id', productId)
+      .single();
+
+    if (error) throw error;
+    if (data) {
+      await OfflineDB.saveProduct(data);
+      return;
+    }
+  } catch (error) {
+    console.warn('Could not refresh product stock from Supabase:', error);
+  }
+
+  if (typeof fallbackStockQuantity === 'number') {
+    try {
+      await OfflineDB.updateProduct(productId, {
+        stock_quantity: fallbackStockQuantity,
+        updated_at: new Date().toISOString()
+      } as Partial<Product>);
+    } catch (error) {
+      console.warn('Could not apply fallback product stock locally:', error);
+    }
+  }
+};
+
+const normalizeRemoteSaleResult = async (data: any, sale: SaleInsert): Promise<Sale> => {
+  if (data && typeof data === 'object' && 'success' in data) {
+    if (data.success === false) {
+      throw new Error(data.error || 'Sale creation failed');
+    }
+
+    const saleId = getSaleIdFromRpcResult(data);
+    if (!saleId) {
+      throw new Error('Sale creation did not return a sale id');
+    }
+
+    const { data: saleRow, error } = await (supabase.from('sales') as any)
+      .select('*')
+      .eq('id', saleId)
+      .single();
+
+    if (!error && saleRow) {
+      return saleRow as Sale;
+    }
+
+    console.warn('Could not fetch newly-created sale row; caching sale from request data:', error);
+    return buildSaleFromInsert(saleId, sale);
+  }
+
+  return data as Sale;
+};
+
 export const createSale = async (sale: SaleInsert): Promise<Sale> => {
   try {
     if (isOnline) {
@@ -435,12 +515,20 @@ export const createSale = async (sale: SaleInsert): Promise<Sale> => {
 
       if (error) throw error;
 
-      // Cache the new sale
-      await OfflineDB.saveSale(data as Sale);
-      return data as Sale;
+      const remoteSale = await normalizeRemoteSaleResult(data, sale);
+      const rpcStockQuantity = data && typeof data === 'object' ? data.new_stock_quantity : undefined;
+
+      try {
+        await OfflineDB.saveSale(remoteSale);
+      } catch (cacheError) {
+        console.warn('Sale was created remotely but could not be cached locally:', cacheError);
+      }
+
+      await cacheProductAfterRemoteStockChange(remoteSale.product_id, rpcStockQuantity);
+      return remoteSale;
     } else {
       // Offline sale
-      const newSale = await OfflineDB.createSale({
+      return await OfflineDB.createSale({
         product_id: sale.product_id,
         quantity: sale.quantity,
         unit_price: sale.unit_price,
@@ -450,16 +538,6 @@ export const createSale = async (sale: SaleInsert): Promise<Sale> => {
         sale_date: sale.sale_date ?? new Date().toISOString().split('T')[0],
         notes: sale.notes ?? null
       });
-      
-      // Update local product stock
-      const product = await OfflineDB.getProductById(sale.product_id);
-      if (product) {
-        await OfflineDB.updateProduct(sale.product_id, {
-          stock_quantity: product.stock_quantity - sale.quantity
-        });
-      }
-      
-      return newSale;
     }
   } catch (error) {
     console.error('Error creating sale online, saving offline:', error);
@@ -479,8 +557,9 @@ export const createSale = async (sale: SaleInsert): Promise<Sale> => {
 export const updateSale = async (id: string, updates: Partial<SaleInsert>): Promise<Sale> => {
   try {
     if (isOnline) {
+      const previousLocalSale = await OfflineDB.getSaleById(id).catch(() => null);
       const { data, error } = await (supabase.from('sales') as any)
-        .update(updates)
+        .update({ ...updates, updated_at: new Date().toISOString() })
         .eq('id', id)
         .select(`
           *,
@@ -499,8 +578,16 @@ export const updateSale = async (id: string, updates: Partial<SaleInsert>): Prom
         product_name: (data as any).products?.name
       };
 
-      // Update local cache
-      await OfflineDB.saveSale(formattedSale);
+      try {
+        await OfflineDB.saveSale(formattedSale);
+      } catch (cacheError) {
+        console.warn('Sale was updated remotely but could not be cached locally:', cacheError);
+      }
+
+      await cacheProductAfterRemoteStockChange(data.product_id);
+      if (previousLocalSale?.product_id && previousLocalSale.product_id !== data.product_id) {
+        await cacheProductAfterRemoteStockChange(previousLocalSale.product_id);
+      }
       return formattedSale;
     } else {
       const updated = await OfflineDB.updateSale(id, updates as Partial<Sale>);
@@ -518,25 +605,12 @@ export const updateSale = async (id: string, updates: Partial<SaleInsert>): Prom
 export const deleteSale = async (id: string): Promise<boolean> => {
   try {
     if (isOnline) {
-      // First, get the sale to know the quantity and product_id for stock restoration
+      // The database sale-delete trigger restores stock remotely.
+      // Locally, OfflineDB.deleteSale restores the cached product stock.
       const { data: sale, error: getError } = await (supabase.from('sales') as any)
-        .select('product_id, quantity')
+        .select('product_id')
         .eq('id', id)
         .single();
-
-      if (!getError && sale) {
-        // Try to restore stock online first
-        const { data: product, error: prodError } = await (supabase.from('products') as any)
-          .select('stock_quantity')
-          .eq('id', sale.product_id)
-          .single();
-
-        if (!prodError && product) {
-          await (supabase.from('products') as any)
-            .update({ stock_quantity: product.stock_quantity + sale.quantity })
-            .eq('id', sale.product_id);
-        }
-      }
 
       const { error } = await (supabase.from('sales') as any)
         .delete()
@@ -545,7 +619,14 @@ export const deleteSale = async (id: string): Promise<boolean> => {
       if (error) throw error;
 
       // Remove from local cache (OfflineDB.deleteSale also restores local stock)
-      return await OfflineDB.deleteSale(id);
+      const deletedLocally = await OfflineDB.deleteSale(id);
+      if (!deletedLocally) {
+        console.warn('Sale was deleted remotely but was not found in the local cache.');
+      }
+      if (!getError && sale?.product_id) {
+        await cacheProductAfterRemoteStockChange(sale.product_id);
+      }
+      return true;
     } else {
       return await OfflineDB.deleteSale(id);
     }

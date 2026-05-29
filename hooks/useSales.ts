@@ -40,7 +40,7 @@ export const useSales = () => {
     }
   }, []);
 
-  const createSale = useCallback(async (sale: Omit<Sale, 'id' | 'created_at'>) => {
+  const createSale = useCallback(async (sale: Omit<Sale, 'id' | 'created_at' | 'updated_at'>) => {
     try {
       setError(null);
       setSyncStatus('pending');

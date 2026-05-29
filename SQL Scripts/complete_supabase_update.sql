@@ -200,6 +200,13 @@ CREATE TRIGGER update_products_updated_at
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
+-- Trigger for sales table (updated_at)
+DROP TRIGGER IF EXISTS update_sales_updated_at ON sales;
+CREATE TRIGGER update_sales_updated_at
+    BEFORE UPDATE ON sales
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
 -- Trigger for party_purchases table (updated_at)
 DROP TRIGGER IF EXISTS update_party_purchases_updated_at ON party_purchases;
 CREATE TRIGGER update_party_purchases_updated_at

@@ -1,4 +1,4 @@
-const { convertPngToIco } = require('@fiahfy/ico-convert');
+const pngToIco = require('png-to-ico').default;
 const fs = require('fs');
 const path = require('path');
 
@@ -9,8 +9,7 @@ async function generateIco() {
     const iconPath = path.join(__dirname, '..', 'public', 'icons', 'icon-512x512.png');
     const outputPath = path.join(__dirname, '..', 'public', 'icons', 'icon.ico');
 
-    const pngData = fs.readFileSync(iconPath);
-    const icoData = await convertPngToIco(pngData);
+    const icoData = await pngToIco(iconPath);
     fs.writeFileSync(outputPath, icoData);
 
     console.log('✅ Successfully created icon.ico');

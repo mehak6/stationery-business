@@ -49,6 +49,7 @@ export interface Sale {
   sale_date: string;
   notes: string | null;
   created_at: string;
+  updated_at: string;
 }
 
 export interface Category {
@@ -311,6 +312,20 @@ export const deleteProduct = async (id: string): Promise<boolean> => {
 
 // ==================== SALES ====================
 
+const saleFromDoc = (doc: any): Sale => ({
+  id: fromPouchID(doc._id),
+  product_id: doc.product_id,
+  quantity: doc.quantity,
+  unit_price: doc.unit_price,
+  total_amount: doc.total_amount,
+  profit: doc.profit,
+  customer_info: doc.customer_info,
+  sale_date: doc.sale_date,
+  notes: doc.notes,
+  created_at: doc.created_at,
+  updated_at: doc.updated_at || doc.created_at
+});
+
 export const getAllSales = async (limit?: number): Promise<Sale[]> => {
   try {
     const db = await getSalesDB();
@@ -323,21 +338,7 @@ export const getAllSales = async (limit?: number): Promise<Sale[]> => {
       descending: true
     });
 
-    return result.rows.map(row => {
-      const doc: any = row.doc;
-      return {
-        id: fromPouchID(doc._id),
-        product_id: doc.product_id,
-        quantity: doc.quantity,
-        unit_price: doc.unit_price,
-        total_amount: doc.total_amount,
-        profit: doc.profit,
-        customer_info: doc.customer_info,
-        sale_date: doc.sale_date,
-        notes: doc.notes,
-        created_at: doc.created_at
-      };
-    });
+    return result.rows.map(row => saleFromDoc(row.doc));
   } catch (error) {
     console.error('Error getting sales:', error);
     return [];
@@ -349,18 +350,7 @@ export const getSaleById = async (id: string): Promise<Sale | null> => {
     const db = await getSalesDB();
     const docId = toPouchID('sale', id);
     const doc: any = await db.get(docId);
-    return {
-      id: fromPouchID(doc._id),
-      product_id: doc.product_id,
-      quantity: doc.quantity,
-      unit_price: doc.unit_price,
-      total_amount: doc.total_amount,
-      profit: doc.profit,
-      customer_info: doc.customer_info,
-      sale_date: doc.sale_date,
-      notes: doc.notes,
-      created_at: doc.created_at
-    };
+    return saleFromDoc(doc);
   } catch (error) {
     console.error('Error getting sale by ID:', error);
     return null;
@@ -371,23 +361,27 @@ export const saveSale = async (sale: Sale): Promise<Sale> => {
   try {
     const db = await getSalesDB();
     const docId = toPouchID('sale', sale.id);
+    const normalizedSale = {
+      ...sale,
+      updated_at: sale.updated_at || sale.created_at
+    };
 
     let doc: any;
     try {
       doc = await db.get(docId);
       // Update existing
-      const updatedDoc = { ...doc, ...sale };
+      const updatedDoc = { ...doc, ...normalizedSale };
       await db.put(updatedDoc);
     } catch {
       // Create new
       doc = {
         _id: docId,
-        ...sale
+        ...normalizedSale
       };
       await db.put(doc);
     }
 
-    return sale;
+    return normalizedSale;
   } catch (error) {
     console.error('Error saving sale:', error);
     throw error;
@@ -407,7 +401,7 @@ export const bulkSaveSales = async (sales: Sale[]): Promise<void> => {
 
     const docs = sales.map(s => {
       const _id = toPouchID('sale', s.id);
-      const doc: any = { ...s, _id };
+      const doc: any = { ...s, updated_at: s.updated_at || s.created_at, _id };
       if (revMap.has(_id)) doc._rev = revMap.get(_id);
       return doc;
     });
@@ -419,7 +413,7 @@ export const bulkSaveSales = async (sales: Sale[]): Promise<void> => {
   }
 };
 
-export const createSale = async (sale: Omit<Sale, 'id' | 'created_at'>): Promise<Sale> => {
+export const createSale = async (sale: Omit<Sale, 'id' | 'created_at' | 'updated_at'>): Promise<Sale> => {
   const productsDB = await getProductsDB();
   const salesDB = await getSalesDB();
   
@@ -448,7 +442,8 @@ export const createSale = async (sale: Omit<Sale, 'id' | 'created_at'>): Promise
   const saleDoc = {
     _id: toPouchID('sale', id),
     ...sale,
-    created_at: now
+    created_at: now,
+    updated_at: now
   };
 
   // 3. Update Product FIRST (Source of truth for stock)
@@ -475,7 +470,8 @@ export const createSale = async (sale: Omit<Sale, 'id' | 'created_at'>): Promise
   return {
     id,
     ...sale,
-    created_at: now
+    created_at: now,
+    updated_at: now
   };
 };
 
@@ -534,18 +530,7 @@ export const updateSale = async (id: string, updates: Partial<Sale>): Promise<Sa
 
     await salesDB.put(updatedSaleDoc);
 
-    return {
-      id: fromPouchID(updatedSaleDoc._id),
-      product_id: updatedSaleDoc.product_id,
-      quantity: updatedSaleDoc.quantity,
-      unit_price: updatedSaleDoc.unit_price,
-      total_amount: updatedSaleDoc.total_amount,
-      profit: updatedSaleDoc.profit,
-      customer_info: updatedSaleDoc.customer_info,
-      sale_date: updatedSaleDoc.sale_date,
-      notes: updatedSaleDoc.notes,
-      created_at: updatedSaleDoc.created_at
-    };
+    return saleFromDoc(updatedSaleDoc);
   } catch (error) {
     console.error('Error updating sale:', error);
     throw error;
@@ -595,18 +580,7 @@ export const getSalesByDate = async (date: string): Promise<Sale[]> => {
       limit: 10000
     });
 
-    return result.docs.map((doc: any) => ({
-      id: fromPouchID(doc._id),
-      product_id: doc.product_id,
-      quantity: doc.quantity,
-      unit_price: doc.unit_price,
-      total_amount: doc.total_amount,
-      profit: doc.profit,
-      customer_info: doc.customer_info,
-      sale_date: doc.sale_date,
-      notes: doc.notes,
-      created_at: doc.created_at
-    }));
+    return result.docs.map((doc: any) => saleFromDoc(doc));
   } catch (error) {
     console.error('Error getting sales by date:', error);
     return [];
@@ -623,10 +597,7 @@ export const getSalesByProduct = async (productId: string): Promise<Sale[]> => {
       limit: 10000
     });
 
-    return result.docs.map((doc: any) => ({
-      ...doc,
-      id: fromPouchID(doc._id)
-    }));
+    return result.docs.map((doc: any) => saleFromDoc(doc));
   } catch (error) {
     console.warn('PouchDB find failed for getSalesByProduct, falling back to allDocs:', error);
     const db = await getSalesDB();
@@ -639,10 +610,7 @@ export const getSalesByProduct = async (productId: string): Promise<Sale[]> => {
     return allDocs.rows
       .map(row => row.doc as any)
       .filter(doc => doc && doc.product_id === productId)
-      .map(doc => ({
-        ...doc,
-        id: fromPouchID(doc._id)
-      }));
+      .map(doc => saleFromDoc(doc));
   }
 };
 
@@ -664,18 +632,7 @@ export const getSalesByDateRange = async (startDate: string, endDate: string): P
         const saleDatePart = doc.sale_date.split('T')[0];
         return saleDatePart >= startDate && saleDatePart <= endDate;
       })
-      .map(doc => ({
-        id: fromPouchID(doc._id),
-        product_id: doc.product_id,
-        quantity: doc.quantity,
-        unit_price: doc.unit_price,
-        total_amount: doc.total_amount,
-        profit: doc.profit,
-        customer_info: doc.customer_info,
-        sale_date: doc.sale_date,
-        notes: doc.notes,
-        created_at: doc.created_at
-      }));
+      .map(doc => saleFromDoc(doc));
   } catch (error) {
     console.error('Error getting sales by date range:', error);
     return [];
@@ -1076,7 +1033,7 @@ let productHistoryDB: any = null;
 
 const getProductHistoryDB = () => {
   if (!productHistoryDB && typeof window !== 'undefined') {
-    const PouchDB = require('pouchdb').default;
+    const PouchDB = require('pouchdb-browser').default;
     productHistoryDB = new PouchDB('product_history');
   }
   return productHistoryDB;

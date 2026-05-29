@@ -83,7 +83,8 @@ const sanitizeForSupabase = (entity: string, data: any): any => {
         customer_info: cleanData.customer_info || null,
         sale_date: cleanData.sale_date || new Date().toISOString(),
         notes: cleanData.notes || null,
-        created_at: cleanData.created_at || new Date().toISOString()
+        created_at: cleanData.created_at || new Date().toISOString(),
+        updated_at: cleanData.updated_at || cleanData.created_at || new Date().toISOString()
       };
     case 'category':
       return {
@@ -205,7 +206,7 @@ export const syncSales = async () => {
     // 1. PULL
     const { data: remoteData, error: pullError } = await (supabase.from('sales') as any)
       .select('*')
-      .gt('created_at', meta.last_sync_time);
+      .or(`created_at.gt.${meta.last_sync_time},updated_at.gt.${meta.last_sync_time}`);
 
     if (pullError) {
       logSupabaseError('pull sales', pullError);
@@ -220,7 +221,7 @@ export const syncSales = async () => {
     // 2. PUSH
     const localSales = await OfflineDB.getAllSales();
     const toPush = localSales
-      .filter(s => s.created_at > meta.last_sync_time)
+      .filter(s => (s.updated_at || s.created_at) > meta.last_sync_time)
       .map(s => sanitizeForSupabase('sale', s));
 
     if (toPush.length > 0) {
