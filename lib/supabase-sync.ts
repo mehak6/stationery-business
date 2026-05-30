@@ -113,6 +113,23 @@ const sanitizeForSupabase = (entity: string, data: any): any => {
   }
 };
 
+const withoutUpdatedAt = (data: any): any => {
+  const { updated_at, ...rest } = data;
+  return rest;
+};
+
+const isMissingColumnError = (error: any, column: string): boolean => {
+  const text = [error?.message, error?.details, error?.hint, error?.code]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return text.includes(column.toLowerCase()) &&
+    (text.includes('does not exist') ||
+      text.includes('schema cache') ||
+      text.includes('could not find'));
+};
+
 const logSupabaseError = (context: string, error: any) => {
   console.error(`❌ Supabase Error during ${context}:`, {
     message: error.message,
@@ -204,9 +221,19 @@ export const syncSales = async () => {
 
   try {
     // 1. PULL
-    const { data: remoteData, error: pullError } = await (supabase.from('sales') as any)
+    let salesUpdatedAtSupported = true;
+    let { data: remoteData, error: pullError } = await (supabase.from('sales') as any)
       .select('*')
       .or(`created_at.gt.${meta.last_sync_time},updated_at.gt.${meta.last_sync_time}`);
+
+    if (pullError && isMissingColumnError(pullError, 'updated_at')) {
+      salesUpdatedAtSupported = false;
+      const legacyPull = await (supabase.from('sales') as any)
+        .select('*')
+        .gt('created_at', meta.last_sync_time);
+      remoteData = legacyPull.data;
+      pullError = legacyPull.error;
+    }
 
     if (pullError) {
       logSupabaseError('pull sales', pullError);
@@ -222,10 +249,22 @@ export const syncSales = async () => {
     const localSales = await OfflineDB.getAllSales();
     const toPush = localSales
       .filter(s => (s.updated_at || s.created_at) > meta.last_sync_time)
-      .map(s => sanitizeForSupabase('sale', s));
+      .map(s => {
+        const sanitized = sanitizeForSupabase('sale', s);
+        return salesUpdatedAtSupported ? sanitized : withoutUpdatedAt(sanitized);
+      });
 
     if (toPush.length > 0) {
-      await batchUpsert('sales', toPush);
+      try {
+        await batchUpsert('sales', toPush);
+      } catch (error) {
+        if (!salesUpdatedAtSupported || !isMissingColumnError(error, 'updated_at')) {
+          throw error;
+        }
+
+        await batchUpsert('sales', toPush.map(withoutUpdatedAt));
+        salesUpdatedAtSupported = false;
+      }
       stats.push = toPush.length;
     }
 

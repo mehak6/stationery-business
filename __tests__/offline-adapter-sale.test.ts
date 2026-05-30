@@ -97,4 +97,69 @@ describe('offline-adapter sale stock handling', () => {
     expect(OfflineDB.saveProduct).toHaveBeenCalledWith(remoteProduct);
     expect(OfflineDB.createSale).not.toHaveBeenCalled();
   });
+
+  test('falls back to direct remote insert when RPC is missing', async () => {
+    const remoteSale = {
+      id: 'sale-direct',
+      ...saleInput,
+      created_at: '2026-05-29T10:00:00.000Z',
+    };
+    const productBefore = {
+      id: 'product-1',
+      name: 'Notebook',
+      stock_quantity: 10,
+      updated_at: '2026-05-29T10:00:00.000Z',
+    };
+    const productAfter = {
+      ...productBefore,
+      stock_quantity: 7,
+      updated_at: '2026-05-29T10:00:01.000Z',
+    };
+    const productResponses = [productBefore, productAfter, productAfter];
+
+    (supabase.rpc as jest.Mock).mockResolvedValue({
+      data: null,
+      error: {
+        code: 'PGRST202',
+        message: 'Could not find the function public.create_sale_with_stock_check in the schema cache',
+      },
+    });
+
+    (supabase.from as jest.Mock).mockImplementation((table: string) => {
+      if (table === 'products') {
+        return {
+          select: jest.fn(() => ({
+            eq: jest.fn(() => ({
+              single: jest.fn().mockResolvedValue({
+                data: productResponses.shift(),
+                error: null,
+              }),
+            })),
+          })),
+          update: jest.fn(() => ({
+            eq: jest.fn().mockResolvedValue({ error: null }),
+          })),
+        };
+      }
+
+      return {
+        insert: jest.fn(() => ({
+          select: jest.fn(() => ({
+            single: jest.fn().mockResolvedValue({ data: remoteSale, error: null }),
+          })),
+        })),
+      };
+    });
+
+    await expect(createSale(saleInput)).resolves.toEqual({
+      ...remoteSale,
+      updated_at: remoteSale.created_at,
+    });
+    expect(OfflineDB.saveSale).toHaveBeenCalledWith({
+      ...remoteSale,
+      updated_at: remoteSale.created_at,
+    });
+    expect(OfflineDB.saveProduct).toHaveBeenCalledWith(productAfter);
+    expect(OfflineDB.createSale).not.toHaveBeenCalled();
+  });
 });

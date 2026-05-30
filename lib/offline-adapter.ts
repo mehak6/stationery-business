@@ -423,6 +423,18 @@ const getSaleIdFromRpcResult = (data: any): string | null => {
   return data.sale_id || data.id || null;
 };
 
+const isMissingRemoteFeatureError = (error: any, feature: string): boolean => {
+  const text = [error?.message, error?.details, error?.hint, error?.code]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return text.includes(feature.toLowerCase()) &&
+    (text.includes('does not exist') ||
+      text.includes('schema cache') ||
+      text.includes('could not find'));
+};
+
 const buildSaleFromInsert = (id: string, sale: SaleInsert): Sale => {
   const now = new Date().toISOString();
   return {
@@ -498,6 +510,121 @@ const normalizeRemoteSaleResult = async (data: any, sale: SaleInsert): Promise<S
   return data as Sale;
 };
 
+const fetchRemoteProduct = async (productId: string): Promise<Product | null> => {
+  const { data, error } = await (supabase.from('products') as any)
+    .select('*')
+    .eq('id', productId)
+    .single();
+
+  if (error) throw error;
+  return data || null;
+};
+
+const updateRemoteProductStock = async (productId: string, stockQuantity: number): Promise<void> => {
+  const { error } = await (supabase.from('products') as any)
+    .update({
+      stock_quantity: Math.max(0, stockQuantity),
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', productId);
+
+  if (error) throw error;
+};
+
+const createSaleWithoutRpc = async (sale: SaleInsert): Promise<Sale> => {
+  const productBefore = await fetchRemoteProduct(sale.product_id);
+  if (!productBefore) throw new Error('Product not found');
+  if (productBefore.stock_quantity < sale.quantity) {
+    throw new Error(`Insufficient stock. Available: ${productBefore.stock_quantity}, Requested: ${sale.quantity}`);
+  }
+
+  const { data, error } = await (supabase.from('sales') as any)
+    .insert({
+      product_id: sale.product_id,
+      quantity: sale.quantity,
+      unit_price: sale.unit_price,
+      total_amount: sale.total_amount,
+      profit: sale.profit,
+      customer_info: sale.customer_info ?? null,
+      sale_date: sale.sale_date ?? new Date().toISOString().split('T')[0],
+      notes: sale.notes ?? null
+    })
+    .select('*')
+    .single();
+
+  if (error) throw error;
+
+  const expectedStock = productBefore.stock_quantity - sale.quantity;
+  const productAfter = await fetchRemoteProduct(sale.product_id);
+  if (productAfter && productAfter.stock_quantity !== expectedStock) {
+    await updateRemoteProductStock(sale.product_id, expectedStock);
+  }
+
+  return {
+    ...data,
+    updated_at: data.updated_at || data.created_at
+  } as Sale;
+};
+
+const ensureRemoteStockAfterSaleUpdate = async (
+  previousSale: (Sale & { products?: Partial<Product> }) | null,
+  updatedSale: Sale
+): Promise<void> => {
+  if (!previousSale) return;
+
+  const oldProductId = previousSale.product_id;
+  const newProductId = updatedSale.product_id;
+  const oldQuantity = Number(previousSale.quantity) || 0;
+  const newQuantity = Number(updatedSale.quantity) || 0;
+
+  if (oldProductId === newProductId) {
+    const productBeforeStock = Number(previousSale.products?.stock_quantity);
+    if (!Number.isFinite(productBeforeStock)) return;
+
+    const expectedStock = productBeforeStock - (newQuantity - oldQuantity);
+    const productAfter = await fetchRemoteProduct(newProductId);
+    if (productAfter && productAfter.stock_quantity !== expectedStock) {
+      await updateRemoteProductStock(newProductId, expectedStock);
+    }
+    return;
+  }
+
+  const [oldProductAfter, newProductAfter] = await Promise.all([
+    fetchRemoteProduct(oldProductId).catch(() => null),
+    fetchRemoteProduct(newProductId).catch(() => null)
+  ]);
+
+  if (oldProductAfter) {
+    const oldProductBeforeStock = Number(previousSale.products?.stock_quantity);
+    const expectedOldStock = Number.isFinite(oldProductBeforeStock)
+      ? oldProductBeforeStock + oldQuantity
+      : oldProductAfter.stock_quantity;
+    if (oldProductAfter.stock_quantity !== expectedOldStock) {
+      await updateRemoteProductStock(oldProductId, expectedOldStock);
+    }
+  }
+
+  if (newProductAfter) {
+    const expectedNewStock = newProductAfter.stock_quantity - newQuantity;
+    await updateRemoteProductStock(newProductId, expectedNewStock);
+  }
+};
+
+const ensureRemoteStockAfterSaleDelete = async (
+  sale: (Sale & { products?: Partial<Product> }) | null
+): Promise<void> => {
+  if (!sale?.product_id) return;
+
+  const productBeforeStock = Number(sale.products?.stock_quantity);
+  if (!Number.isFinite(productBeforeStock)) return;
+
+  const expectedStock = productBeforeStock + (Number(sale.quantity) || 0);
+  const productAfter = await fetchRemoteProduct(sale.product_id);
+  if (productAfter && productAfter.stock_quantity !== expectedStock) {
+    await updateRemoteProductStock(sale.product_id, expectedStock);
+  }
+};
+
 export const createSale = async (sale: SaleInsert): Promise<Sale> => {
   try {
     if (isOnline) {
@@ -513,7 +640,19 @@ export const createSale = async (sale: SaleInsert): Promise<Sale> => {
         p_notes: sale.notes ?? null
       });
 
-      if (error) throw error;
+      if (error) {
+        if (isMissingRemoteFeatureError(error, 'create_sale_with_stock_check')) {
+          const directSale = await createSaleWithoutRpc(sale);
+          try {
+            await OfflineDB.saveSale(directSale);
+          } catch (cacheError) {
+            console.warn('Sale was created remotely but could not be cached locally:', cacheError);
+          }
+          await cacheProductAfterRemoteStockChange(directSale.product_id);
+          return directSale;
+        }
+        throw error;
+      }
 
       const remoteSale = await normalizeRemoteSaleResult(data, sale);
       const rpcStockQuantity = data && typeof data === 'object' ? data.new_stock_quantity : undefined;
@@ -558,8 +697,22 @@ export const updateSale = async (id: string, updates: Partial<SaleInsert>): Prom
   try {
     if (isOnline) {
       const previousLocalSale = await OfflineDB.getSaleById(id).catch(() => null);
-      const { data, error } = await (supabase.from('sales') as any)
-        .update({ ...updates, updated_at: new Date().toISOString() })
+      const { data: previousRemoteSale } = await (supabase.from('sales') as any)
+        .select(`
+          *,
+          products (
+            id,
+            name,
+            purchase_price,
+            stock_quantity
+          )
+        `)
+        .eq('id', id)
+        .single();
+
+      const updatePayload = { ...updates, updated_at: new Date().toISOString() };
+      let { data, error } = await (supabase.from('sales') as any)
+        .update(updatePayload)
         .eq('id', id)
         .select(`
           *,
@@ -571,10 +724,29 @@ export const updateSale = async (id: string, updates: Partial<SaleInsert>): Prom
         `)
         .single();
 
+      if (error && isMissingRemoteFeatureError(error, 'updated_at')) {
+        const { updated_at, ...legacyPayload } = updatePayload as any;
+        const legacyResult = await (supabase.from('sales') as any)
+          .update(legacyPayload)
+          .eq('id', id)
+          .select(`
+            *,
+            products (
+              id,
+              name,
+              purchase_price
+            )
+          `)
+          .single();
+        data = legacyResult.data;
+        error = legacyResult.error;
+      }
+
       if (error) throw error;
 
       const formattedSale = {
         ...data,
+        updated_at: data.updated_at || data.created_at,
         product_name: (data as any).products?.name
       };
 
@@ -584,6 +756,7 @@ export const updateSale = async (id: string, updates: Partial<SaleInsert>): Prom
         console.warn('Sale was updated remotely but could not be cached locally:', cacheError);
       }
 
+      await ensureRemoteStockAfterSaleUpdate(previousRemoteSale || previousLocalSale, formattedSale as Sale);
       await cacheProductAfterRemoteStockChange(data.product_id);
       if (previousLocalSale?.product_id && previousLocalSale.product_id !== data.product_id) {
         await cacheProductAfterRemoteStockChange(previousLocalSale.product_id);
@@ -608,7 +781,13 @@ export const deleteSale = async (id: string): Promise<boolean> => {
       // The database sale-delete trigger restores stock remotely.
       // Locally, OfflineDB.deleteSale restores the cached product stock.
       const { data: sale, error: getError } = await (supabase.from('sales') as any)
-        .select('product_id')
+        .select(`
+          *,
+          products (
+            id,
+            stock_quantity
+          )
+        `)
         .eq('id', id)
         .single();
 
@@ -622,6 +801,9 @@ export const deleteSale = async (id: string): Promise<boolean> => {
       const deletedLocally = await OfflineDB.deleteSale(id);
       if (!deletedLocally) {
         console.warn('Sale was deleted remotely but was not found in the local cache.');
+      }
+      if (!getError && sale) {
+        await ensureRemoteStockAfterSaleDelete(sale as Sale & { products?: Partial<Product> });
       }
       if (!getError && sale?.product_id) {
         await cacheProductAfterRemoteStockChange(sale.product_id);
