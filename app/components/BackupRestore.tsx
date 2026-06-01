@@ -29,6 +29,7 @@ export default function BackupRestore({ onClose, showToast }: BackupRestoreProps
   const [daysUntilBackup, setDaysUntilBackup] = useState(0);
   const [restorePreview, setRestorePreview] = useState<BackupData | null>(null);
   const [isRestoring, setIsRestoring] = useState(false);
+  const [dryRunSummary, setDryRunSummary] = useState<{ productsToAdd: number; salesToAdd: number; purchasesToAdd: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const reloadTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -57,6 +58,7 @@ export default function BackupRestore({ onClose, showToast }: BackupRestoreProps
       if (event.key === 'Escape') {
         if (restorePreview) {
           setRestorePreview(null);
+      setDryRunSummary(null);
         } else {
           onClose();
         }
@@ -94,6 +96,18 @@ export default function BackupRestore({ onClose, showToast }: BackupRestoreProps
 
     try {
       const backup = await readBackupFile(file);
+
+      const [currentProducts, currentSales, currentPurchases] = await Promise.all([
+        getProducts(),
+        getSales(10000),
+        getPartyPurchases()
+      ]);
+
+      const productsToAdd = backup.products.filter((product: any) => !currentProducts.find(p => p.id === product.id || p.name === product.name)).length;
+      const salesToAdd = backup.sales.filter((sale: any) => !currentSales.find(s => s.id === sale.id)).length;
+      const purchasesToAdd = backup.partyPurchases.filter((purchase: any) => !currentPurchases.find(p => p.id === purchase.id)).length;
+
+      setDryRunSummary({ productsToAdd, salesToAdd, purchasesToAdd });
       setRestorePreview(backup);
     } catch (error: any) {
       showToast(error.message || 'Failed to read backup file', 'error');
@@ -192,6 +206,7 @@ export default function BackupRestore({ onClose, showToast }: BackupRestoreProps
       }
 
       setRestorePreview(null);
+      setDryRunSummary(null);
 
       // Refresh the page to show restored data
       reloadTimerRef.current = setTimeout(() => {
@@ -270,6 +285,15 @@ export default function BackupRestore({ onClose, showToast }: BackupRestoreProps
                   <strong>Party Purchases:</strong> {restorePreview.metadata.totalPartyPurchases}
                 </p>
               </div>
+
+              {dryRunSummary && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <h4 className="font-semibold text-blue-900 mb-1">Dry-run Preview (new records only)</h4>
+                  <p className="text-sm text-blue-800">Products to add: <strong>{dryRunSummary.productsToAdd}</strong></p>
+                  <p className="text-sm text-blue-800">Sales to add: <strong>{dryRunSummary.salesToAdd}</strong></p>
+                  <p className="text-sm text-blue-800">Purchases to add: <strong>{dryRunSummary.purchasesToAdd}</strong></p>
+                </div>
+              )}
 
               <div className="flex gap-3">
                 <button
