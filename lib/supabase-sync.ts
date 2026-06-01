@@ -143,6 +143,16 @@ const isForeignKeyError = (error: any): boolean => {
     text.includes('sales_product_id_fkey');
 };
 
+const isInsufficientStockError = (error: any): boolean => {
+  const text = [error?.message, error?.details, error?.hint, error?.code]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return text.includes('insufficient stock') ||
+    (text.includes('available') && text.includes('requested'));
+};
+
 const logSupabaseError = (context: string, error: any) => {
   console.error(`❌ Supabase Error during ${context}:`, {
     message: error.message,
@@ -314,7 +324,7 @@ export const syncSales = async () => {
           salesUpdatedAtSupported = false;
           stats.recovered++;
           pushedCount = toPush.length;
-        } else if (isForeignKeyError(error)) {
+        } else if (isForeignKeyError(error) || isInsufficientStockError(error)) {
           stats.recovered++;
           for (const row of toPush) {
             try {
@@ -323,13 +333,14 @@ export const syncSales = async () => {
               if (rowError) throw rowError;
               pushedCount++;
             } catch (rowError) {
-              if (!isForeignKeyError(rowError)) {
+              if (!isForeignKeyError(rowError) && !isInsufficientStockError(rowError)) {
                 logSupabaseError('upsert sales row', rowError);
                 throw rowError;
               }
-              console.warn('Skipping orphan sale during sync:', {
+              console.warn('Skipping sale during sync:', {
                 id: row.id,
                 product_id: row.product_id,
+                quantity: row.quantity,
                 error: (rowError as any)?.message
               });
               stats.skipped++;
