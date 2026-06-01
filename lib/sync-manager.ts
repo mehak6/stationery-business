@@ -5,18 +5,30 @@ import { getSyncMetaDB } from './pouchdb-client';
 import { checkSupabaseStatus } from './supabase-status';
 
 export type SyncStatus = 'idle' | 'syncing' | 'success' | 'error' | 'paused';
+export type SyncHealth = 'fully_synced' | 'recovered_retry' | 'skipped_orphan' | 'real_failure' | 'paused';
+
+export interface SyncBucketStats {
+  push: number;
+  pull: number;
+  errors: number;
+  skipped?: number;
+  recovered?: number;
+}
 
 export interface SyncResult {
   status: SyncStatus;
+  health: SyncHealth;
   timestamp: string;
   stats: {
-    products: { push: number; pull: number; errors: number };
-    sales: { push: number; pull: number; errors: number };
-    categories: { push: number; pull: number; errors: number };
-    partyPurchases: { push: number; pull: number; errors: number };
+    products: SyncBucketStats;
+    sales: SyncBucketStats;
+    categories: SyncBucketStats;
+    partyPurchases: SyncBucketStats;
   };
   totalSynced: number;
   totalErrors: number;
+  totalSkipped: number;
+  totalRecovered: number;
   duration: number;
   error?: string;
 }
@@ -173,6 +185,7 @@ const syncWithRetry = async (
       const duration = Date.now() - startTime;
       const result: SyncResult = {
         status: 'paused',
+        health: 'paused',
         timestamp: new Date().toISOString(),
         stats: {
           products: { push: 0, pull: 0, errors: 0 },
@@ -182,6 +195,8 @@ const syncWithRetry = async (
         },
         totalSynced: 0,
         totalErrors: 0,
+        totalSkipped: 0,
+        totalRecovered: 0,
         duration,
         error: 'Supabase project is paused. Please resume to sync.'
       };
@@ -208,14 +223,35 @@ const syncWithRetry = async (
       stats.categories.errors +
       stats.partyPurchases.errors;
 
+    const totalSkipped =
+      (stats.products.skipped || 0) +
+      (stats.sales.skipped || 0) +
+      (stats.categories.skipped || 0) +
+      (stats.partyPurchases.skipped || 0);
+
+    const totalRecovered =
+      (stats.products.recovered || 0) +
+      (stats.sales.recovered || 0) +
+      (stats.categories.recovered || 0) +
+      (stats.partyPurchases.recovered || 0);
+
     const duration = Date.now() - startTime;
 
     const result: SyncResult = {
       status: totalErrors > 0 ? 'error' : 'success',
+      health: totalErrors > 0
+        ? 'real_failure'
+        : totalSkipped > 0
+          ? 'skipped_orphan'
+          : totalRecovered > 0
+            ? 'recovered_retry'
+            : 'fully_synced',
       timestamp: new Date().toISOString(),
       stats,
       totalSynced,
       totalErrors,
+      totalSkipped,
+      totalRecovered,
       duration
     };
 
@@ -238,6 +274,7 @@ const syncWithRetry = async (
     const duration = Date.now() - startTime;
     const result: SyncResult = {
       status: 'error',
+      health: 'real_failure',
       timestamp: new Date().toISOString(),
       stats: {
         products: { push: 0, pull: 0, errors: 0 },
@@ -247,6 +284,8 @@ const syncWithRetry = async (
       },
       totalSynced: 0,
       totalErrors: 1,
+      totalSkipped: 0,
+      totalRecovered: 0,
       duration,
       error: err instanceof Error ? err.message : 'Unknown error'
     };
@@ -500,8 +539,11 @@ export const getSyncStats = async () => {
   return {
     lastSync: lastResult?.timestamp || null,
     lastStatus: lastResult?.status || 'idle',
+    syncHealth: lastResult?.health || 'fully_synced',
     totalSynced: lastResult?.totalSynced || 0,
     totalErrors: lastResult?.totalErrors || 0,
+    totalSkipped: lastResult?.totalSkipped || 0,
+    totalRecovered: lastResult?.totalRecovered || 0,
     isSyncing,
     isQueued,
     autoSyncEnabled: currentConfig.autoSync,

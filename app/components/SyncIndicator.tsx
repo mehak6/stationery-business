@@ -142,7 +142,9 @@ export default function SyncIndicator() {
               )}
               {lastSyncTime && !error && (
                 <p className="text-xs text-gray-500 mt-0.5">
-                  {stats.totalSynced} items synced
+                  {stats.totalSynced} synced
+                  {stats.totalSkipped > 0 && `, ${stats.totalSkipped} skipped`}
+                  {stats.totalRecovered > 0 && `, ${stats.totalRecovered} recovered`}
                 </p>
               )}
             </div>

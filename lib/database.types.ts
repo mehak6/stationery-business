@@ -172,6 +172,50 @@ export interface Database {
           updated_at?: string
         }
       }
+      inventory_transactions: {
+        Row: {
+          id: string
+          product_id: string | null
+          sale_id: string | null
+          action: string
+          quantity_change: number
+          stock_before: number
+          stock_after: number
+          source: string
+          reason: string | null
+          metadata: Json
+          created_by: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          product_id?: string | null
+          sale_id?: string | null
+          action: string
+          quantity_change: number
+          stock_before: number
+          stock_after: number
+          source?: string
+          reason?: string | null
+          metadata?: Json
+          created_by?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          product_id?: string | null
+          sale_id?: string | null
+          action?: string
+          quantity_change?: number
+          stock_before?: number
+          stock_after?: number
+          source?: string
+          reason?: string | null
+          metadata?: Json
+          created_by?: string | null
+          created_at?: string
+        }
+      }
       party_purchases: {
         Row: {
           id: string
@@ -317,18 +361,27 @@ export interface Database {
           p_sale_date: string
           p_notes: string
         }
-        Returns: {
-          id: string
-          product_id: string
-          quantity: number
-          unit_price: number
-          total_amount: number
-          profit: number
-          customer_info: Json
-          sale_date: string
-          notes: string
-          created_at: string
+        Returns: Json
+      }
+      update_sale_with_stock_check: {
+        Args: {
+          p_sale_id: string
+          p_product_id?: string | null
+          p_quantity?: number | null
+          p_unit_price?: number | null
+          p_total_amount?: number | null
+          p_profit?: number | null
+          p_customer_info?: Json | null
+          p_sale_date?: string | null
+          p_notes?: string | null
         }
+        Returns: Json
+      }
+      delete_sale_with_stock_check: {
+        Args: {
+          p_sale_id: string
+        }
+        Returns: Json
       }
       get_dashboard_stats: {
         Args: Record<string, never>

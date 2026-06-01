@@ -78,6 +78,14 @@ export default function SyncSettingsModal({ isOpen, onClose }: SyncSettingsModal
                   <p className="text-gray-500">Errors</p>
                   <p className="font-medium">{lastSyncResult.totalErrors}</p>
                 </div>
+                <div>
+                  <p className="text-gray-500">Skipped</p>
+                  <p className="font-medium">{lastSyncResult.totalSkipped || 0}</p>
+                </div>
+                <div>
+                  <p className="text-gray-500">Recovered</p>
+                  <p className="font-medium">{lastSyncResult.totalRecovered || 0}</p>
+                </div>
               </div>
 
               {/* Detailed Stats */}

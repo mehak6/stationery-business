@@ -27,6 +27,8 @@ interface SyncMeta {
   last_sync_time: string;
 }
 
+const createSyncStats = () => ({ pull: 0, push: 0, errors: 0, skipped: 0, recovered: 0 });
+
 const getSyncMeta = async (table: string): Promise<SyncMeta> => {
   const db = await getSyncMetaDB();
   const id = `sync_meta_${table}`;
@@ -188,7 +190,7 @@ const getRemoteProductIds = async (): Promise<Set<string>> => {
 export const syncProducts = async () => {
   const meta = await getSyncMeta('products');
   const syncStartTime = new Date().toISOString();
-  let stats = { pull: 0, push: 0, errors: 0 };
+  let stats = createSyncStats();
 
   try {
     // 1. PULL changes from Supabase
@@ -246,7 +248,7 @@ export const syncProducts = async () => {
 export const syncSales = async () => {
   const meta = await getSyncMeta('sales');
   const syncStartTime = new Date().toISOString();
-  let stats = { pull: 0, push: 0, errors: 0 };
+  let stats = createSyncStats();
 
   try {
     // 1. PULL
@@ -290,6 +292,7 @@ export const syncSales = async () => {
       .map(s => ({ source: s, sanitized: sanitizeForSupabase('sale', s) }));
     const orphanSales = changedSales.filter(({ sanitized }) => !knownProductIds.has(sanitized.product_id));
     if (orphanSales.length > 0) {
+      stats.skipped += orphanSales.length;
       console.warn(
         `Skipping ${orphanSales.length} sale(s) during sync because their product no longer exists.`,
         orphanSales.map(({ source }) => ({ id: source.id, product_id: source.product_id }))
@@ -309,8 +312,10 @@ export const syncSales = async () => {
         if (salesUpdatedAtSupported && isMissingColumnError(error, 'updated_at')) {
           await batchUpsert('sales', toPush.map(withoutUpdatedAt));
           salesUpdatedAtSupported = false;
+          stats.recovered++;
           pushedCount = toPush.length;
         } else if (isForeignKeyError(error)) {
+          stats.recovered++;
           for (const row of toPush) {
             try {
               const { error: rowError } = await (supabase.from('sales') as any)
@@ -327,6 +332,7 @@ export const syncSales = async () => {
                 product_id: row.product_id,
                 error: (rowError as any)?.message
               });
+              stats.skipped++;
             }
           }
         } else {
@@ -351,7 +357,7 @@ export const syncSales = async () => {
 export const syncCategories = async () => {
   const meta = await getSyncMeta('categories');
   const syncStartTime = new Date().toISOString();
-  let stats = { pull: 0, push: 0, errors: 0 };
+  let stats = createSyncStats();
 
   try {
     // 1. PULL
@@ -393,7 +399,7 @@ export const syncCategories = async () => {
 export const syncPartyPurchases = async () => {
   const meta = await getSyncMeta('party_purchases');
   const syncStartTime = new Date().toISOString();
-  let stats = { pull: 0, push: 0, errors: 0 };
+  let stats = createSyncStats();
 
   try {
     // 1. PULL
@@ -490,10 +496,10 @@ export const performFullSync = async () => {
   console.log('Starting sequential synchronization with pre-flight checks and chunking...');
   
   const stats: any = {
-    products: { pull: 0, push: 0, errors: 0 },
-    sales: { pull: 0, push: 0, errors: 0 },
-    categories: { pull: 0, push: 0, errors: 0 },
-    partyPurchases: { pull: 0, push: 0, errors: 0 },
+    products: createSyncStats(),
+    sales: createSyncStats(),
+    categories: createSyncStats(),
+    partyPurchases: createSyncStats(),
     deletions: 0,
     timestamp: new Date().toISOString()
   };

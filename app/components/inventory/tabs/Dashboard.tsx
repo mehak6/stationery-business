@@ -38,6 +38,13 @@ interface DashboardProps {
 export default function Dashboard({ onNavigate }: DashboardProps) {
   const { showToast } = useToast();
   const { syncStatus, lastSyncTime, stats, supabaseStatus, isSyncing, error } = useSyncStatus();
+  const syncHealthLabel: Record<string, string> = {
+    fully_synced: 'Fully synced',
+    recovered_retry: 'Recovered retry',
+    skipped_orphan: 'Skipped orphan records',
+    real_failure: 'Real failure',
+    paused: 'Paused'
+  };
   const [syncing, setSyncing] = useState(false);
   const [analytics, setAnalytics] = useState({
     totalProducts: 0,
@@ -401,7 +408,9 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           <div className="text-sm text-gray-700">
             <span className="mr-4">Pending: {stats.isQueued ? 1 : 0}</span>
             <span className="mr-4">Failed: {stats.totalErrors}</span>
-            <span>Status: {isSyncing ? 'Retrying / Syncing' : syncStatus}</span>
+            <span className="mr-4">Skipped: {stats.totalSkipped}</span>
+            <span className="mr-4">Recovered: {stats.totalRecovered}</span>
+            <span>Status: {isSyncing ? 'Retrying / Syncing' : syncHealthLabel[stats.syncHealth] || syncStatus}</span>
           </div>
         </div>
         {supabaseStatus === 'paused' && (

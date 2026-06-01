@@ -249,6 +249,10 @@ export const deletePartyPurchase = async (id: string): Promise<boolean> => {
   return await OfflineDB.deletePartyPurchase(id);
 };
 
+export const cleanupLocalOrphanSales = async (options: { dryRun?: boolean } = {}) => {
+  return await OfflineDB.cleanupOrphanSales(options);
+};
+
 export const syncAllData = async () => {
   const { performFullSync } = await import('./supabase-sync');
   return await performFullSync();
@@ -537,6 +541,28 @@ const normalizeRemoteSaleResult = async (data: any, sale: SaleInsert): Promise<S
   return data as Sale;
 };
 
+const fetchRemoteSaleById = async (saleId: string): Promise<Sale & { product_name?: string }> => {
+  const { data, error } = await (supabase.from('sales') as any)
+    .select(`
+      *,
+      products (
+        id,
+        name,
+        purchase_price
+      )
+    `)
+    .eq('id', saleId)
+    .single();
+
+  if (error) throw error;
+
+  return {
+    ...data,
+    updated_at: data.updated_at || data.created_at,
+    product_name: (data as any).products?.name
+  };
+};
+
 const fetchRemoteProduct = async (productId: string): Promise<Product | null> => {
   const { data, error } = await (supabase.from('products') as any)
     .select('*')
@@ -545,17 +571,6 @@ const fetchRemoteProduct = async (productId: string): Promise<Product | null> =>
 
   if (error) throw error;
   return data || null;
-};
-
-const updateRemoteProductStock = async (productId: string, stockQuantity: number): Promise<void> => {
-  const { error } = await (supabase.from('products') as any)
-    .update({
-      stock_quantity: Math.max(0, stockQuantity),
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', productId);
-
-  if (error) throw error;
 };
 
 const createSaleWithoutRpc = async (sale: SaleInsert): Promise<Sale> => {
@@ -581,75 +596,10 @@ const createSaleWithoutRpc = async (sale: SaleInsert): Promise<Sale> => {
 
   if (error) throw error;
 
-  const expectedStock = productBefore.stock_quantity - sale.quantity;
-  const productAfter = await fetchRemoteProduct(sale.product_id);
-  if (productAfter && productAfter.stock_quantity !== expectedStock) {
-    await updateRemoteProductStock(sale.product_id, expectedStock);
-  }
-
   return {
     ...data,
     updated_at: data.updated_at || data.created_at
   } as Sale;
-};
-
-const ensureRemoteStockAfterSaleUpdate = async (
-  previousSale: (Sale & { products?: Partial<Product> }) | null,
-  updatedSale: Sale
-): Promise<void> => {
-  if (!previousSale) return;
-
-  const oldProductId = previousSale.product_id;
-  const newProductId = updatedSale.product_id;
-  const oldQuantity = Number(previousSale.quantity) || 0;
-  const newQuantity = Number(updatedSale.quantity) || 0;
-
-  if (oldProductId === newProductId) {
-    const productBeforeStock = Number(previousSale.products?.stock_quantity);
-    if (!Number.isFinite(productBeforeStock)) return;
-
-    const expectedStock = productBeforeStock - (newQuantity - oldQuantity);
-    const productAfter = await fetchRemoteProduct(newProductId);
-    if (productAfter && productAfter.stock_quantity !== expectedStock) {
-      await updateRemoteProductStock(newProductId, expectedStock);
-    }
-    return;
-  }
-
-  const [oldProductAfter, newProductAfter] = await Promise.all([
-    fetchRemoteProduct(oldProductId).catch(() => null),
-    fetchRemoteProduct(newProductId).catch(() => null)
-  ]);
-
-  if (oldProductAfter) {
-    const oldProductBeforeStock = Number(previousSale.products?.stock_quantity);
-    const expectedOldStock = Number.isFinite(oldProductBeforeStock)
-      ? oldProductBeforeStock + oldQuantity
-      : oldProductAfter.stock_quantity;
-    if (oldProductAfter.stock_quantity !== expectedOldStock) {
-      await updateRemoteProductStock(oldProductId, expectedOldStock);
-    }
-  }
-
-  if (newProductAfter) {
-    const expectedNewStock = newProductAfter.stock_quantity - newQuantity;
-    await updateRemoteProductStock(newProductId, expectedNewStock);
-  }
-};
-
-const ensureRemoteStockAfterSaleDelete = async (
-  sale: (Sale & { products?: Partial<Product> }) | null
-): Promise<void> => {
-  if (!sale?.product_id) return;
-
-  const productBeforeStock = Number(sale.products?.stock_quantity);
-  if (!Number.isFinite(productBeforeStock)) return;
-
-  const expectedStock = productBeforeStock + (Number(sale.quantity) || 0);
-  const productAfter = await fetchRemoteProduct(sale.product_id);
-  if (productAfter && productAfter.stock_quantity !== expectedStock) {
-    await updateRemoteProductStock(sale.product_id, expectedStock);
-  }
 };
 
 export const createSale = async (sale: SaleInsert): Promise<Sale> => {
@@ -726,38 +676,38 @@ export const createSale = async (sale: SaleInsert): Promise<Sale> => {
 export const updateSale = async (id: string, updates: Partial<SaleInsert>): Promise<Sale> => {
   try {
     if (isOnline) {
-      const previousLocalSale = await OfflineDB.getSaleById(id).catch(() => null);
       const { data: previousRemoteSale } = await (supabase.from('sales') as any)
-        .select(`
-          *,
-          products (
-            id,
-            name,
-            purchase_price,
-            stock_quantity
-          )
-        `)
+        .select('id, product_id')
         .eq('id', id)
         .single();
 
       const updatePayload = { ...updates, updated_at: new Date().toISOString() };
-      let { data, error } = await (supabase.from('sales') as any)
-        .update(updatePayload)
-        .eq('id', id)
-        .select(`
-          *,
-          products (
-            id,
-            name,
-            purchase_price
-          )
-        `)
-        .single();
+      let data: any = null;
+      let error: any = null;
+      let rpcStockQuantity: number | undefined;
 
-      if (error && isMissingRemoteFeatureError(error, 'updated_at')) {
-        const { updated_at, ...legacyPayload } = updatePayload as any;
-        const legacyResult = await (supabase.from('sales') as any)
-          .update(legacyPayload)
+      const rpcResult = await (supabase.rpc as any)('update_sale_with_stock_check', {
+        p_sale_id: id,
+        p_product_id: updates.product_id ?? null,
+        p_quantity: updates.quantity ?? null,
+        p_unit_price: updates.unit_price ?? null,
+        p_total_amount: updates.total_amount ?? null,
+        p_profit: updates.profit ?? null,
+        p_customer_info: updates.customer_info ?? null,
+        p_sale_date: updates.sale_date ?? null,
+        p_notes: updates.notes ?? null
+      });
+
+      if (!rpcResult.error) {
+        if (rpcResult.data?.success === false) {
+          throw new Error(rpcResult.data.error || 'Sale update failed');
+        }
+        const saleId = getSaleIdFromRpcResult(rpcResult.data) || id;
+        data = await fetchRemoteSaleById(saleId);
+        rpcStockQuantity = rpcResult.data?.new_stock_quantity;
+      } else if (isMissingRemoteFeatureError(rpcResult.error, 'update_sale_with_stock_check')) {
+        const tableResult = await (supabase.from('sales') as any)
+          .update(updatePayload)
           .eq('id', id)
           .select(`
             *,
@@ -768,8 +718,28 @@ export const updateSale = async (id: string, updates: Partial<SaleInsert>): Prom
             )
           `)
           .single();
-        data = legacyResult.data;
-        error = legacyResult.error;
+        data = tableResult.data;
+        error = tableResult.error;
+
+        if (error && isMissingRemoteFeatureError(error, 'updated_at')) {
+          const { updated_at, ...legacyPayload } = updatePayload as any;
+          const legacyResult = await (supabase.from('sales') as any)
+            .update(legacyPayload)
+            .eq('id', id)
+            .select(`
+              *,
+              products (
+                id,
+                name,
+                purchase_price
+              )
+            `)
+            .single();
+          data = legacyResult.data;
+          error = legacyResult.error;
+        }
+      } else {
+        error = rpcResult.error;
       }
 
       if (error) throw error;
@@ -786,10 +756,9 @@ export const updateSale = async (id: string, updates: Partial<SaleInsert>): Prom
         console.warn('Sale was updated remotely but could not be cached locally:', cacheError);
       }
 
-      await ensureRemoteStockAfterSaleUpdate(previousRemoteSale || previousLocalSale, formattedSale as Sale);
-      await cacheProductAfterRemoteStockChange(data.product_id);
-      if (previousLocalSale?.product_id && previousLocalSale.product_id !== data.product_id) {
-        await cacheProductAfterRemoteStockChange(previousLocalSale.product_id);
+      await cacheProductAfterRemoteStockChange(data.product_id, rpcStockQuantity);
+      if (previousRemoteSale?.product_id && previousRemoteSale.product_id !== data.product_id) {
+        await cacheProductAfterRemoteStockChange(previousRemoteSale.product_id);
       }
       return formattedSale;
     } else {
@@ -811,22 +780,30 @@ export const updateSale = async (id: string, updates: Partial<SaleInsert>): Prom
 export const deleteSale = async (id: string): Promise<boolean> => {
   try {
     if (isOnline) {
-      // The database sale-delete trigger restores stock remotely.
-      // Locally, OfflineDB.deleteSale restores the cached product stock.
       const { data: sale, error: getError } = await (supabase.from('sales') as any)
-        .select(`
-          *,
-          products (
-            id,
-            stock_quantity
-          )
-        `)
+        .select('id, product_id')
         .eq('id', id)
         .single();
 
-      const { error } = await (supabase.from('sales') as any)
-        .delete()
-        .eq('id', id);
+      let productId = sale?.product_id;
+      let rpcStockQuantity: number | undefined;
+      const rpcResult = await (supabase.rpc as any)('delete_sale_with_stock_check', {
+        p_sale_id: id
+      });
+
+      let error = rpcResult.error;
+      if (!error) {
+        if (rpcResult.data?.success === false) {
+          throw new Error(rpcResult.data.error || 'Sale delete failed');
+        }
+        productId = rpcResult.data?.product_id || productId;
+        rpcStockQuantity = rpcResult.data?.new_stock_quantity;
+      } else if (isMissingRemoteFeatureError(error, 'delete_sale_with_stock_check')) {
+        const tableResult = await (supabase.from('sales') as any)
+          .delete()
+          .eq('id', id);
+        error = tableResult.error;
+      }
 
       if (error) throw error;
 
@@ -835,11 +812,8 @@ export const deleteSale = async (id: string): Promise<boolean> => {
       if (!deletedLocally) {
         console.warn('Sale was deleted remotely but was not found in the local cache.');
       }
-      if (!getError && sale) {
-        await ensureRemoteStockAfterSaleDelete(sale as Sale & { products?: Partial<Product> });
-      }
-      if (!getError && sale?.product_id) {
-        await cacheProductAfterRemoteStockChange(sale.product_id);
+      if (!getError && productId) {
+        await cacheProductAfterRemoteStockChange(productId, rpcStockQuantity);
       }
       return true;
     } else {

@@ -569,6 +569,46 @@ export const deleteSale = async (id: string): Promise<boolean> => {
   }
 };
 
+export interface OrphanSaleCleanupResult {
+  scanned: number;
+  orphaned: number;
+  removed: number;
+  orphanSales: Sale[];
+}
+
+export const cleanupOrphanSales = async (
+  options: { dryRun?: boolean } = {}
+): Promise<OrphanSaleCleanupResult> => {
+  const { dryRun = true } = options;
+  const [products, sales] = await Promise.all([
+    getAllProducts(),
+    getAllSales()
+  ]);
+  const productIds = new Set(products.map(product => product.id));
+  const orphanSales = sales.filter(sale => !productIds.has(sale.product_id));
+
+  let removed = 0;
+  if (!dryRun && orphanSales.length > 0) {
+    const salesDB = await getSalesDB();
+    for (const sale of orphanSales) {
+      try {
+        const doc = await salesDB.get(toPouchID('sale', sale.id));
+        await salesDB.remove(doc);
+        removed++;
+      } catch (error) {
+        console.warn('Could not remove orphan local sale:', { saleId: sale.id, error });
+      }
+    }
+  }
+
+  return {
+    scanned: sales.length,
+    orphaned: orphanSales.length,
+    removed,
+    orphanSales
+  };
+};
+
 export const getSalesByDate = async (date: string): Promise<Sale[]> => {
   try {
     const db = await getSalesDB();

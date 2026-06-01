@@ -30,6 +30,9 @@ export const useSyncStatus = () => {
   const [stats, setStats] = useState({
     totalSynced: 0,
     totalErrors: 0,
+    totalSkipped: 0,
+    totalRecovered: 0,
+    syncHealth: 'fully_synced',
     isQueued: false
   });
 
@@ -84,6 +87,9 @@ export const useSyncStatus = () => {
           setStats({
             totalSynced: syncStats.totalSynced,
             totalErrors: syncStats.totalErrors,
+            totalSkipped: syncStats.totalSkipped,
+            totalRecovered: syncStats.totalRecovered,
+            syncHealth: syncStats.syncHealth,
             isQueued: syncStats.isQueued
           });
         } catch (err) {
@@ -107,7 +113,10 @@ export const useSyncStatus = () => {
       setStats(prev => ({
         ...prev,
         totalSynced: result.totalSynced,
-        totalErrors: result.totalErrors
+        totalErrors: result.totalErrors,
+        totalSkipped: result.totalSkipped || 0,
+        totalRecovered: result.totalRecovered || 0,
+        syncHealth: result.health || 'fully_synced'
       }));
 
       if (result.error) {
@@ -152,6 +161,9 @@ export const useSyncStatus = () => {
       setStats({
         totalSynced: result.totalSynced,
         totalErrors: result.totalErrors,
+        totalSkipped: result.totalSkipped || 0,
+        totalRecovered: result.totalRecovered || 0,
+        syncHealth: result.health || 'fully_synced',
         isQueued: false
       });
 
@@ -182,6 +194,9 @@ export const useSyncStatus = () => {
       setStats({
         totalSynced: result.totalSynced,
         totalErrors: result.totalErrors,
+        totalSkipped: result.totalSkipped || 0,
+        totalRecovered: result.totalRecovered || 0,
+        syncHealth: result.health || 'fully_synced',
         isQueued: false
       });
 
@@ -243,6 +258,9 @@ export const useSyncStatus = () => {
     setStats({
       totalSynced: syncStats.totalSynced,
       totalErrors: syncStats.totalErrors,
+      totalSkipped: syncStats.totalSkipped,
+      totalRecovered: syncStats.totalRecovered,
+      syncHealth: syncStats.syncHealth,
       isQueued: syncStats.isQueued
     });
   }, []);
