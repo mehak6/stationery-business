@@ -447,6 +447,21 @@ const isMissingRemoteFeatureError = (error: any, feature: string): boolean => {
       text.includes('could not find'));
 };
 
+const isOfflineFallbackError = (error: any): boolean => {
+  const text = [error?.message, error?.details, error?.hint, error?.code, error?.name]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return !isOnline ||
+    text.includes('failed to fetch') ||
+    text.includes('networkerror') ||
+    text.includes('network error') ||
+    text.includes('load failed') ||
+    text.includes('timeout') ||
+    text.includes('offline');
+};
+
 const buildSaleFromInsert = (id: string, sale: SaleInsert): Sale => {
   const now = new Date().toISOString();
   return {
@@ -692,6 +707,9 @@ export const createSale = async (sale: SaleInsert): Promise<Sale> => {
     }
   } catch (error) {
     console.error('Error creating sale online, saving offline:', error);
+    if (!isOfflineFallbackError(error)) {
+      throw error;
+    }
     return await OfflineDB.createSale({
       product_id: sale.product_id,
       quantity: sale.quantity,
@@ -781,6 +799,9 @@ export const updateSale = async (id: string, updates: Partial<SaleInsert>): Prom
     }
   } catch (error) {
     console.error('Error updating sale online, saving offline:', error);
+    if (!isOfflineFallbackError(error)) {
+      throw error;
+    }
     const updated = await OfflineDB.updateSale(id, updates as Partial<Sale>);
     if (!updated) throw new Error('Sale not found locally');
     return updated;
@@ -826,6 +847,9 @@ export const deleteSale = async (id: string): Promise<boolean> => {
     }
   } catch (error) {
     console.error('Error deleting sale online, marking offline:', error);
+    if (!isOfflineFallbackError(error)) {
+      throw error;
+    }
     return await OfflineDB.deleteSale(id);
   }
 };
