@@ -130,6 +130,17 @@ const isMissingColumnError = (error: any, column: string): boolean => {
       text.includes('could not find'));
 };
 
+const isForeignKeyError = (error: any): boolean => {
+  const text = [error?.message, error?.details, error?.hint, error?.code]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return text.includes('23503') ||
+    text.includes('foreign key constraint') ||
+    text.includes('sales_product_id_fkey');
+};
+
 const logSupabaseError = (context: string, error: any) => {
   console.error(`❌ Supabase Error during ${context}:`, {
     message: error.message,
@@ -152,6 +163,21 @@ const batchUpsert = async (table: string, data: any[]) => {
       throw error;
     }
   }
+};
+
+const getRemoteProductIds = async (): Promise<Set<string>> => {
+  const ids = new Set<string>();
+  const CHUNK_SIZE = 1000;
+  for (let from = 0; ; from += CHUNK_SIZE) {
+    const { data, error } = await (supabase.from('products') as any)
+      .select('id')
+      .range(from, from + CHUNK_SIZE - 1);
+
+    if (error) throw error;
+    (data || []).forEach((row: Pick<Product, 'id'>) => ids.add(row.id));
+    if (!data || data.length < CHUNK_SIZE) break;
+  }
+  return ids;
 };
 
 // ==================== PRODUCTS SYNC ====================
@@ -246,26 +272,64 @@ export const syncSales = async () => {
     }
 
     // 2. PUSH
-    const localSales = await OfflineDB.getAllSales();
-    const toPush = localSales
+    const [localSales, localProducts, remoteProductIds] = await Promise.all([
+      OfflineDB.getAllSales(),
+      OfflineDB.getAllProducts(),
+      getRemoteProductIds()
+    ]);
+    const knownProductIds = new Set([
+      ...localProducts.map(product => product.id),
+      ...Array.from(remoteProductIds)
+    ]);
+
+    const changedSales = localSales
       .filter(s => (s.updated_at || s.created_at) > meta.last_sync_time)
-      .map(s => {
-        const sanitized = sanitizeForSupabase('sale', s);
-        return salesUpdatedAtSupported ? sanitized : withoutUpdatedAt(sanitized);
-      });
+      .map(s => ({ source: s, sanitized: sanitizeForSupabase('sale', s) }));
+    const orphanSales = changedSales.filter(({ sanitized }) => !knownProductIds.has(sanitized.product_id));
+    if (orphanSales.length > 0) {
+      console.warn(
+        `Skipping ${orphanSales.length} sale(s) during sync because their product no longer exists.`,
+        orphanSales.map(({ source }) => ({ id: source.id, product_id: source.product_id }))
+      );
+    }
+
+    const toPush = changedSales
+      .filter(({ sanitized }) => knownProductIds.has(sanitized.product_id))
+      .map(({ sanitized }) => salesUpdatedAtSupported ? sanitized : withoutUpdatedAt(sanitized));
 
     if (toPush.length > 0) {
+      let pushedCount = 0;
       try {
         await batchUpsert('sales', toPush);
+        pushedCount = toPush.length;
       } catch (error) {
-        if (!salesUpdatedAtSupported || !isMissingColumnError(error, 'updated_at')) {
+        if (salesUpdatedAtSupported && isMissingColumnError(error, 'updated_at')) {
+          await batchUpsert('sales', toPush.map(withoutUpdatedAt));
+          salesUpdatedAtSupported = false;
+          pushedCount = toPush.length;
+        } else if (isForeignKeyError(error)) {
+          for (const row of toPush) {
+            try {
+              const { error: rowError } = await (supabase.from('sales') as any)
+                .upsert(salesUpdatedAtSupported ? row : withoutUpdatedAt(row));
+              if (rowError) throw rowError;
+              pushedCount++;
+            } catch (rowError) {
+              if (!isForeignKeyError(rowError)) {
+                throw rowError;
+              }
+              console.warn('Skipping orphan sale during sync:', {
+                id: row.id,
+                product_id: row.product_id,
+                error: (rowError as any)?.message
+              });
+            }
+          }
+        } else {
           throw error;
         }
-
-        await batchUpsert('sales', toPush.map(withoutUpdatedAt));
-        salesUpdatedAtSupported = false;
       }
-      stats.push = toPush.length;
+      stats.push = pushedCount;
     }
 
     await updateSyncMeta('sales', syncStartTime);
