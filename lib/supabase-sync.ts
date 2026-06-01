@@ -153,13 +153,16 @@ const logSupabaseError = (context: string, error: any) => {
 /**
  * Helper to perform batched upserts to avoid payload size limits
  */
-const batchUpsert = async (table: string, data: any[]) => {
+const batchUpsert = async (table: string, data: any[], options: { logErrors?: boolean } = {}) => {
+  const { logErrors = true } = options;
   const CHUNK_SIZE = 50;
   for (let i = 0; i < data.length; i += CHUNK_SIZE) {
     const chunk = data.slice(i, i + CHUNK_SIZE);
     const { error } = await (supabase.from(table) as any).upsert(chunk);
     if (error) {
-      logSupabaseError(`upsert ${table} (chunk ${i/CHUNK_SIZE})`, error);
+      if (logErrors) {
+        logSupabaseError(`upsert ${table} (chunk ${i/CHUNK_SIZE})`, error);
+      }
       throw error;
     }
   }
@@ -300,7 +303,7 @@ export const syncSales = async () => {
     if (toPush.length > 0) {
       let pushedCount = 0;
       try {
-        await batchUpsert('sales', toPush);
+        await batchUpsert('sales', toPush, { logErrors: false });
         pushedCount = toPush.length;
       } catch (error) {
         if (salesUpdatedAtSupported && isMissingColumnError(error, 'updated_at')) {
@@ -316,6 +319,7 @@ export const syncSales = async () => {
               pushedCount++;
             } catch (rowError) {
               if (!isForeignKeyError(rowError)) {
+                logSupabaseError('upsert sales row', rowError);
                 throw rowError;
               }
               console.warn('Skipping orphan sale during sync:', {
@@ -326,6 +330,7 @@ export const syncSales = async () => {
             }
           }
         } else {
+          logSupabaseError('upsert sales', error);
           throw error;
         }
       }
