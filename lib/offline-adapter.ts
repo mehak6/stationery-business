@@ -394,13 +394,25 @@ export const getSalesByDateRange = async (startDate: string, endDate: string): P
         .order('created_at', { ascending: false });
 
       if (!error && data) {
-        // Update local cache
-        await Promise.all((data || []).map((sale: any) => 
-          OfflineDB.saveSale({
-            ...sale,
-            product_name: sale.products?.name || productMap.get(sale.product_id)
-          } as any).catch(() => {})
+        const remoteSales = (data || []).map((sale: any) => ({
+          ...sale,
+          updated_at: sale.updated_at || sale.created_at,
+          product_name: sale.products?.name || productMap.get(sale.product_id) || 'Unknown Product'
+        }));
+
+        await Promise.all(remoteSales.map((sale: any) =>
+          OfflineDB.saveSale(sale as any).catch(() => {})
         ));
+
+        const remoteIds = new Set(remoteSales.map((sale: Sale) => sale.id));
+        const localOnlySales = (await OfflineDB.getSalesByDateRange(startDate, endDate))
+          .filter(sale => !remoteIds.has(sale.id))
+          .map(sale => ({
+            ...sale,
+            product_name: (sale as any).product_name || productMap.get(sale.product_id) || 'Unknown Product'
+          }));
+
+        return [...remoteSales, ...localOnlySales];
       }
     }
     

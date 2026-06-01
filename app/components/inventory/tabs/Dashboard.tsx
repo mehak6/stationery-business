@@ -227,7 +227,17 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         sale_date: editSaleData.sale_date
       };
 
-      await updateSale(editingSale.id, updates);
+      const updatedSale = await updateSale(editingSale.id, updates);
+      const displayUpdatedSale = {
+        ...editingSale,
+        ...updatedSale,
+        product_name: (updatedSale as any).product_name || (editingSale as any).product_name || (editingSale as any).products?.name,
+        products: (updatedSale as any).products || (editingSale as any).products
+      };
+
+      setAllSales(prev => prev.map(sale =>
+        sale.id === editingSale.id ? displayUpdatedSale as Sale : sale
+      ));
       addAuditEntry('edit_sale', editingSale.id, actionReason);
       await fetchDashboardData(true);
 
