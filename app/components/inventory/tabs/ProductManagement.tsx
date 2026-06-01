@@ -36,6 +36,21 @@ interface ProductManagementProps {
   onNavigate: (view: string) => void;
 }
 
+
+const getActiveFinancialYear = (): string => {
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem('inventory_pro_fy');
+    if (saved && /^\d{4}-\d{2}$/.test(saved)) return saved;
+  }
+
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const startYear = month >= 3 ? year : year - 1;
+  const endYearShort = String((startYear + 1) % 100).padStart(2, '0');
+  return `${startYear}-${endYearShort}`;
+};
+
 export default function ProductManagement({ onNavigate }: ProductManagementProps) {
   const { showToast } = useToast();
   const [products, setProducts] = useState<Product[]>([]);
@@ -52,14 +67,17 @@ export default function ProductManagement({ onNavigate }: ProductManagementProps
   const [editingField, setEditingField] = useState<string | null>(null);
   const [tempValue, setTempValue] = useState('');
   const [saving, setSaving] = useState(false);
-  const [financialYear, setFinancialYear] = useState('2026-27');
+  const [financialYear, setFinancialYear] = useState(getActiveFinancialYear());
   const [historicalStock, setHistoricalStock] = useState<Record<string, number>>({});
   const [isResetting, setIsResetting] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   
-  const isCurrentYear = financialYear === '2026-27';
-  const currentMonth = new Date().getMonth(); // 0-indexed
-  const isMarch = currentMonth === 2;
+const currentFinancialYear = getActiveFinancialYear();
+const isCurrentYear = financialYear === currentFinancialYear;
+const currentMonthIndex = new Date().getMonth(); // 0-indexed
+const isMarch = currentMonthIndex === 2;
+const resetStorageKey = `stock_reset_${financialYear}`;
+  
   const resetStorageKey = `stock_reset_${financialYear}`;
 
   const [undoData, setUndoData] = useState<{
@@ -326,7 +344,7 @@ export default function ProductManagement({ onNavigate }: ProductManagementProps
       {!isCurrentYear && (
         <div className="mb-6 p-4 bg-orange-50 border border-orange-200 rounded-xl flex items-center gap-3 text-orange-800">
           <AlertCircle className="h-5 w-5 shrink-0" />
-          <p className="text-sm">You are viewing <strong>Historical Data</strong> for FY {financialYear}. Records are read-only. Switch to 2026-27 to make changes.</p>
+          <p className="text-sm">You are viewing <strong>Historical Data</strong> for FY {financialYear}. Records are read-only. Switch to {currentFinancialYear} to make changes.</p>
         </div>
       )}
 

@@ -56,6 +56,34 @@ export const subscribeToOnlineStatus = (callback: (online: boolean) => void) => 
 
 // ==================== PRODUCTS ====================
 
+
+const clampNonNegativeNumber = (value: unknown, fallback = 0): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(0, parsed);
+};
+
+const sanitizeProductCreateInput = (product: ProductInsert): ProductInsert => ({
+  ...product,
+  purchase_price: clampNonNegativeNumber(product.purchase_price, 0),
+  selling_price: clampNonNegativeNumber(product.selling_price, 0),
+  stock_quantity: clampNonNegativeNumber(product.stock_quantity, 0),
+  min_stock_level: clampNonNegativeNumber(product.min_stock_level, 0),
+  category_id: product.category_id ?? null,
+  barcode: product.barcode ?? null,
+  supplier_info: product.supplier_info ?? null,
+  image_url: product.image_url ?? null,
+  description: product.description ?? null
+});
+
+const sanitizeProductUpdateInput = (updates: Partial<ProductInsert>): Partial<ProductInsert> => ({
+  ...updates,
+  ...(updates.purchase_price !== undefined ? { purchase_price: clampNonNegativeNumber(updates.purchase_price, 0) } : {}),
+  ...(updates.selling_price !== undefined ? { selling_price: clampNonNegativeNumber(updates.selling_price, 0) } : {}),
+  ...(updates.stock_quantity !== undefined ? { stock_quantity: clampNonNegativeNumber(updates.stock_quantity, 0) } : {}),
+  ...(updates.min_stock_level !== undefined ? { min_stock_level: clampNonNegativeNumber(updates.min_stock_level, 0) } : {})
+});
+
 export const getProducts = async (limit?: number): Promise<Product[]> => {
   try {
     if (isOnline) {
@@ -89,8 +117,10 @@ export const getProducts = async (limit?: number): Promise<Product[]> => {
 export const createProduct = async (product: ProductInsert): Promise<Product> => {
   try {
     if (isOnline) {
+      const sanitizedProduct = sanitizeProductCreateInput(product);
+
       const { data, error } = await (supabase.from('products') as any)
-        .insert(product)
+        .insert(sanitizedProduct)
         .select()
         .single();
 
@@ -101,30 +131,36 @@ export const createProduct = async (product: ProductInsert): Promise<Product> =>
       return data;
     } else {
       // Save to offline DB with pending sync flag
+      const sanitizedProduct = sanitizeProductCreateInput(product);
       const newProduct = await OfflineDB.createProduct({
-        ...product,
-        category_id: product.category_id ?? null,
-        barcode: product.barcode ?? null,
-        stock_quantity: product.stock_quantity ?? 0,
-        min_stock_level: product.min_stock_level ?? 0,
-        supplier_info: product.supplier_info ?? null,
-        image_url: product.image_url ?? null,
-        description: product.description ?? null
+        name: sanitizedProduct.name,
+        category_id: sanitizedProduct.category_id ?? null,
+        barcode: sanitizedProduct.barcode ?? null,
+        purchase_price: sanitizedProduct.purchase_price,
+        selling_price: sanitizedProduct.selling_price,
+        stock_quantity: sanitizedProduct.stock_quantity ?? 0,
+        min_stock_level: sanitizedProduct.min_stock_level ?? 0,
+        supplier_info: sanitizedProduct.supplier_info ?? null,
+        image_url: sanitizedProduct.image_url ?? null,
+        description: sanitizedProduct.description ?? null
       });
       return newProduct;
     }
   } catch (error) {
     console.error('Error creating product online, saving offline:', error);
     // Fallback to offline
+    const sanitizedProduct = sanitizeProductCreateInput(product);
     return await OfflineDB.createProduct({
-      ...product,
-      category_id: product.category_id ?? null,
-      barcode: product.barcode ?? null,
-      stock_quantity: product.stock_quantity ?? 0,
-      min_stock_level: product.min_stock_level ?? 0,
-      supplier_info: product.supplier_info ?? null,
-      image_url: product.image_url ?? null,
-      description: product.description ?? null
+      name: sanitizedProduct.name,
+      category_id: sanitizedProduct.category_id ?? null,
+      barcode: sanitizedProduct.barcode ?? null,
+      purchase_price: sanitizedProduct.purchase_price,
+      selling_price: sanitizedProduct.selling_price,
+      stock_quantity: sanitizedProduct.stock_quantity ?? 0,
+      min_stock_level: sanitizedProduct.min_stock_level ?? 0,
+      supplier_info: sanitizedProduct.supplier_info ?? null,
+      image_url: sanitizedProduct.image_url ?? null,
+      description: sanitizedProduct.description ?? null
     });
   }
 };
@@ -132,8 +168,10 @@ export const createProduct = async (product: ProductInsert): Promise<Product> =>
 export const updateProduct = async (productId: string, updates: Partial<ProductInsert>): Promise<Product> => {
   try {
     if (isOnline) {
+      const sanitizedUpdates = sanitizeProductUpdateInput(updates);
+
       const { data, error } = await (supabase.from('products') as any)
-        .update({ ...updates, updated_at: new Date().toISOString() })
+        .update({ ...sanitizedUpdates, updated_at: new Date().toISOString() })
         .eq('id', productId)
         .select()
         .single();
@@ -145,14 +183,14 @@ export const updateProduct = async (productId: string, updates: Partial<ProductI
       return data;
     } else {
       // Update local DB
-      const updatedProduct = await OfflineDB.updateProduct(productId, updates as Partial<Product>);
+      const updatedProduct = await OfflineDB.updateProduct(productId, sanitizeProductUpdateInput(updates) as Partial<Product>);
       if (!updatedProduct) throw new Error('Product not found in local DB');
       return updatedProduct;
     }
   } catch (error) {
     console.error('Error updating product online, marking offline:', error);
     // Update local DB
-    const updatedProduct = await OfflineDB.updateProduct(productId, updates as Partial<Product>);
+    const updatedProduct = await OfflineDB.updateProduct(productId, sanitizeProductUpdateInput(updates) as Partial<Product>);
     if (!updatedProduct) throw new Error('Product not found in local DB');
     return updatedProduct;
   }
