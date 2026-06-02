@@ -195,6 +195,21 @@ const getRemoteProductIds = async (): Promise<Set<string>> => {
   return ids;
 };
 
+const getRemoteSaleIds = async (): Promise<Set<string>> => {
+  const ids = new Set<string>();
+  const CHUNK_SIZE = 1000;
+  for (let from = 0; ; from += CHUNK_SIZE) {
+    const { data, error } = await (supabase.from('sales') as any)
+      .select('id')
+      .range(from, from + CHUNK_SIZE - 1);
+
+    if (error) throw error;
+    (data || []).forEach((row: Pick<Sale, 'id'>) => ids.add(row.id));
+    if (!data || data.length < CHUNK_SIZE) break;
+  }
+  return ids;
+};
+
 // ==================== PRODUCTS SYNC ====================
 
 export const syncProducts = async () => {
@@ -287,10 +302,11 @@ export const syncSales = async () => {
     }
 
     // 2. PUSH
-    const [localSales, localProducts, remoteProductIds] = await Promise.all([
+    const [localSales, localProducts, remoteProductIds, remoteSaleIds] = await Promise.all([
       OfflineDB.getAllSales(),
       OfflineDB.getAllProducts(),
-      getRemoteProductIds()
+      getRemoteProductIds(),
+      getRemoteSaleIds()
     ]);
     const knownProductIds = new Set([
       ...localProducts.map(product => product.id),
@@ -309,8 +325,18 @@ export const syncSales = async () => {
       );
     }
 
+    const existingRemoteSales = changedSales.filter(({ sanitized }) => remoteSaleIds.has(sanitized.id));
+    if (existingRemoteSales.length > 0) {
+      stats.skipped += existingRemoteSales.length;
+      console.warn(
+        `Skipping ${existingRemoteSales.length} sale(s) during sync because they already exist remotely.`,
+        existingRemoteSales.map(({ source }) => ({ id: source.id, product_id: source.product_id }))
+      );
+    }
+
     const toPush = changedSales
       .filter(({ sanitized }) => knownProductIds.has(sanitized.product_id))
+      .filter(({ sanitized }) => !remoteSaleIds.has(sanitized.id))
       .map(({ sanitized }) => salesUpdatedAtSupported ? sanitized : withoutUpdatedAt(sanitized));
 
     if (toPush.length > 0) {
