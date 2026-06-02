@@ -21,6 +21,7 @@ import type {
   PartyPurchaseInsert 
 } from '../supabase_client';
 import * as OfflineDB from './offline-db';
+import { addProductHistory } from './product-history';
 import { 
   getFinancialYear, 
   getFYRange, 
@@ -156,6 +157,90 @@ export const updateProduct = async (productId: string, updates: Partial<ProductI
     if (!updatedProduct) throw new Error('Product not found in local DB');
     return updatedProduct;
   }
+};
+
+const recordInventoryTransaction = async (entry: {
+  product_id: string;
+  action: string;
+  quantity_change: number;
+  stock_before: number;
+  stock_after: number;
+  reason?: string | null;
+  metadata?: Record<string, unknown>;
+}) => {
+  if (!isOnline) return;
+
+  try {
+    const { error } = await (supabase.from('inventory_transactions') as any)
+      .insert({
+        product_id: entry.product_id,
+        sale_id: null,
+        action: entry.action,
+        quantity_change: entry.quantity_change,
+        stock_before: entry.stock_before,
+        stock_after: entry.stock_after,
+        source: 'app',
+        reason: entry.reason ?? null,
+        metadata: entry.metadata ?? {}
+      });
+
+    if (error) {
+      console.warn('Could not write inventory ledger entry:', error);
+    }
+  } catch (error) {
+    console.warn('Could not write inventory ledger entry:', error);
+  }
+};
+
+export const markDamagedStock = async (
+  product: Product,
+  quantity: number,
+  reason: string,
+  date?: string
+): Promise<Product> => {
+  const damagedQuantity = Math.floor(Number(quantity));
+  if (!Number.isFinite(damagedQuantity) || damagedQuantity <= 0) {
+    throw new Error('Damaged quantity must be greater than zero');
+  }
+
+  if (damagedQuantity > product.stock_quantity) {
+    throw new Error(`Cannot mark more damaged stock than available. Available: ${product.stock_quantity}`);
+  }
+
+  const stockBefore = product.stock_quantity;
+  const stockAfter = stockBefore - damagedQuantity;
+  const cleanReason = reason?.trim() || 'Damaged stock removed';
+
+  const updatedProduct = await updateProduct(product.id, { stock_quantity: stockAfter });
+
+  await addProductHistory({
+    product_id: product.id,
+    product_name: product.name,
+    action: 'damaged_stock_removed',
+    quantity_change: -damagedQuantity,
+    stock_before: stockBefore,
+    stock_after: stockAfter,
+    date: date || new Date().toISOString(),
+    notes: cleanReason
+  });
+
+  await recordInventoryTransaction({
+    product_id: product.id,
+    action: 'damaged_stock_removed',
+    quantity_change: -damagedQuantity,
+    stock_before: stockBefore,
+    stock_after: stockAfter,
+    reason: cleanReason,
+    metadata: {
+      product_name: product.name,
+      adjustment_date: date || new Date().toISOString()
+    }
+  });
+
+  return {
+    ...updatedProduct,
+    stock_quantity: stockAfter
+  } as Product;
 };
 
 export const deleteProduct = async (productId: string): Promise<void> => {

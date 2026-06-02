@@ -30,7 +30,7 @@ export interface ProductHistory {
   id: string;
   product_id: string;
   product_name: string;
-  action: 'stock_added' | 'stock_reduced' | 'price_updated' | 'product_created';
+  action: 'stock_added' | 'stock_reduced' | 'damaged_stock_removed' | 'price_updated' | 'product_created';
   quantity_change?: number;
   stock_before?: number;
   stock_after?: number;

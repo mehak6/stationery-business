@@ -8,13 +8,15 @@ import {
   Plus,
   X,
   BarChart3,
-  Calendar
+  Calendar,
+  AlertTriangle
 } from 'lucide-react';
 import {
   getProducts,
   getSalesByDate,
   createSale,
   updateProduct,
+  markDamagedStock,
   createProduct,
   getClosingStockForYear,
   getAnalytics
@@ -75,6 +77,11 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
   const [showAddStockModal, setShowAddStockModal] = useState(false);
   const [addStockProduct, setAddStockProduct] = useState<Product | null>(null);
   const [addStockQuantity, setAddStockQuantity] = useState(0);
+  const [showDamageModal, setShowDamageModal] = useState(false);
+  const [damageProduct, setDamageProduct] = useState<Product | null>(null);
+  const [damageQuantity, setDamageQuantity] = useState(1);
+  const [damageReason, setDamageReason] = useState('Damaged during sale check');
+  const [damageDate, setDamageDate] = useState(saleDate);
   const [processing, setProcessing] = useState(false);
   const [showQuickAddModal, setShowQuickAddModal] = useState(false);
   const [quickAddPrefillName, setQuickAddPrefillName] = useState('');
@@ -304,6 +311,42 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
     }
   };
 
+  const openDamageModal = (product: Product, quantity = 1) => {
+    setDamageProduct(product);
+    setDamageQuantity(Math.max(1, Math.min(quantity, product.stock_quantity)));
+    setDamageReason('Damaged during sale check');
+    setDamageDate(saleDate);
+    setShowDamageModal(true);
+  };
+
+  const handleMarkDamaged = async () => {
+    if (!damageProduct || damageQuantity <= 0) return;
+
+    try {
+      const updatedProduct = await markDamagedStock(
+        damageProduct,
+        damageQuantity,
+        damageReason,
+        damageDate
+      );
+
+      setProducts(prev => prev.map(p =>
+        p.id === updatedProduct.id ? { ...p, stock_quantity: updatedProduct.stock_quantity } : p
+      ));
+      setCart(prev => prev.map(item =>
+        item.product.id === updatedProduct.id
+          ? { ...item, product: { ...item.product, stock_quantity: updatedProduct.stock_quantity } }
+          : item
+      ));
+      setShowDamageModal(false);
+      setDamageProduct(null);
+      showToast(`Removed ${damageQuantity} damaged unit${damageQuantity === 1 ? '' : 's'} from stock`, 'success');
+    } catch (error) {
+      console.error('Error marking damaged stock:', error);
+      showToast(error instanceof Error ? error.message : 'Error marking damaged stock', 'error');
+    }
+  };
+
   return (
     <div className="p-6 bg-primary-50 min-h-screen">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
@@ -380,13 +423,25 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
                 <div
                   key={product.id}
                   onClick={() => isCurrentYear && addToCart(product)}
-                  className={`flex-shrink-0 w-36 p-3 border-2 border-gray-200 rounded-lg transition-all text-center ${isCurrentYear ? 'cursor-pointer hover:border-primary-500' : 'opacity-80 bg-gray-50'}`}
+                  className={`flex-shrink-0 w-40 p-3 border-2 border-gray-200 rounded-lg transition-all text-center ${isCurrentYear ? 'cursor-pointer hover:border-primary-500' : 'opacity-80 bg-gray-50'}`}
                 >
                   <p className="font-bold text-sm text-gray-900 truncate">{product.name}</p>
                   <p className="text-lg font-bold text-primary-600">₹{product.selling_price}</p>
                   <p className={`text-xs ${displayStock <= product.min_stock_level ? 'text-red-600' : 'text-gray-500'}`}>
                     {displayStock} left
                   </p>
+                  {isCurrentYear && displayStock > 0 && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openDamageModal(product);
+                      }}
+                      className="mt-2 inline-flex items-center justify-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-bold text-red-700 hover:bg-red-100"
+                    >
+                      <AlertTriangle className="h-3 w-3" />
+                      Damaged
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -418,7 +473,18 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
                   <div className="flex flex-col md:flex-row justify-between gap-4">
                     <div className="flex-1">
                       <p className="font-bold text-gray-900">{item.product.name}</p>
-                      <p className="text-xs text-gray-500">Stock: {item.product.stock_quantity}</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-xs text-gray-500">Stock: {item.product.stock_quantity}</p>
+                        {item.product.stock_quantity > 0 && (
+                          <button
+                            onClick={() => openDamageModal(item.product)}
+                            className="inline-flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-bold text-red-700 hover:bg-red-100"
+                          >
+                            <AlertTriangle className="h-3 w-3" />
+                            Damaged
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <div className="flex items-center gap-2">
                       <button onClick={() => updateCartItem(index, 'quantity', Math.max(1, item.quantity - 1))} className="w-8 h-8 border border-primary-500 rounded text-primary-600">-</button>
@@ -513,6 +579,62 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
             <div className="flex gap-3">
               <button onClick={() => handleAddStock((window as any)._tempAddStockDate || saleDate)} className="btn-primary flex-1">Add Stock</button>
               <button onClick={() => setShowAddStockModal(false)} className="btn-outline flex-1">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDamageModal && damageProduct && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[9999]">
+          <div className="bg-white rounded-lg p-6 max-w-sm w-full">
+            <div className="flex items-center gap-2 mb-4">
+              <AlertTriangle className="h-5 w-5 text-red-600" />
+              <h3 className="text-lg font-bold">Damaged Stock: {damageProduct.name}</h3>
+            </div>
+
+            <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-700">
+              Current stock: {damageProduct.stock_quantity}. This reduces stock without creating a sale.
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-xs font-medium text-gray-500 mb-1">Damage Date</label>
+              <input
+                type="date"
+                value={damageDate}
+                onChange={(e) => setDamageDate(e.target.value || saleDate)}
+                className="input-field text-sm"
+              />
+            </div>
+
+            <div className="flex items-center gap-4 mb-4">
+              <button onClick={() => setDamageQuantity(Math.max(1, damageQuantity - 1))} className="btn-outline px-3">-</button>
+              <input
+                type="number"
+                min="1"
+                max={damageProduct.stock_quantity}
+                value={damageQuantity}
+                onChange={(e) => setDamageQuantity(Math.max(1, Math.min(damageProduct.stock_quantity, parseInt(e.target.value) || 1)))}
+                className="input-field text-center"
+              />
+              <button onClick={() => setDamageQuantity(Math.min(damageProduct.stock_quantity, damageQuantity + 1))} className="btn-outline px-3">+</button>
+            </div>
+
+            <div className="mb-6">
+              <label className="block text-xs font-medium text-gray-500 mb-1">Reason</label>
+              <input
+                type="text"
+                value={damageReason}
+                onChange={(e) => setDamageReason(e.target.value)}
+                className="input-field text-sm"
+                placeholder="Damaged during sale check"
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <button onClick={handleMarkDamaged} className="bg-red-600 text-white rounded-lg flex-1 font-bold hover:bg-red-700">
+                Remove Damaged
+              </button>
+              <button onClick={() => setShowDamageModal(false)} className="btn-outline flex-1">Cancel</button>
             </div>
           </div>
         </div>
