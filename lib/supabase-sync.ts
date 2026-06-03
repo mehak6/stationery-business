@@ -27,7 +27,7 @@ interface SyncMeta {
   last_sync_time: string;
 }
 
-const createSyncStats = () => ({ pull: 0, push: 0, errors: 0, skipped: 0, recovered: 0 });
+const createSyncStats = () => ({ pull: 0, push: 0, errors: 0, skipped: 0, recovered: 0, details: [] as string[] });
 
 const getSyncMeta = async (table: string): Promise<SyncMeta> => {
   const db = await getSyncMetaDB();
@@ -319,6 +319,7 @@ export const syncSales = async () => {
     const orphanSales = changedSales.filter(({ sanitized }) => !knownProductIds.has(sanitized.product_id));
     if (orphanSales.length > 0) {
       stats.skipped += orphanSales.length;
+      stats.details.push(`skipped_orphan:${orphanSales.length}`);
       console.warn(
         `Skipping ${orphanSales.length} sale(s) during sync because their product no longer exists.`,
         orphanSales.map(({ source }) => ({ id: source.id, product_id: source.product_id }))
@@ -328,6 +329,7 @@ export const syncSales = async () => {
     const existingRemoteSales = changedSales.filter(({ sanitized }) => remoteSaleIds.has(sanitized.id));
     if (existingRemoteSales.length > 0) {
       stats.skipped += existingRemoteSales.length;
+      stats.details.push(`skipped_old_local_sale:${existingRemoteSales.length}`);
       console.warn(
         `Skipping ${existingRemoteSales.length} sale(s) during sync because they already exist remotely.`,
         existingRemoteSales.map(({ source }) => ({ id: source.id, product_id: source.product_id }))
@@ -370,6 +372,11 @@ export const syncSales = async () => {
                 error: (rowError as any)?.message
               });
               stats.skipped++;
+              if (isInsufficientStockError(rowError)) {
+                stats.details.push('insufficient_stock_skipped:1');
+              } else if (isForeignKeyError(rowError)) {
+                stats.details.push('skipped_orphan:1');
+              }
             }
           }
         } else {

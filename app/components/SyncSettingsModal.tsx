@@ -11,6 +11,16 @@ interface SyncSettingsModalProps {
 
 export default function SyncSettingsModal({ isOpen, onClose }: SyncSettingsModalProps) {
   const { syncConfig, updateConfig, lastSyncResult, stats, triggerSync, forceSync } = useSyncStatus();
+  const healthLabels: Record<string, string> = {
+    fully_synced: 'Fully synced',
+    recovered_retry: 'Recovered retry',
+    skipped_old_local_sale: 'Skipped old local sale',
+    skipped_orphan: 'Skipped orphan record',
+    insufficient_stock_skipped: 'Insufficient stock skipped',
+    local_cache_needs_refresh: 'Local cache needs refresh',
+    real_failure: 'Real failure',
+    paused: 'Paused'
+  };
 
   const [autoSync, setAutoSync] = useState(true);
   const [syncInterval, setSyncInterval] = useState(5);
@@ -64,7 +74,7 @@ export default function SyncSettingsModal({ isOpen, onClose }: SyncSettingsModal
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div>
                   <p className="text-gray-500">Status</p>
-                  <p className="font-medium capitalize">{lastSyncResult.status}</p>
+                  <p className="font-medium">{healthLabels[lastSyncResult.health] || lastSyncResult.status}</p>
                 </div>
                 <div>
                   <p className="text-gray-500">Duration</p>

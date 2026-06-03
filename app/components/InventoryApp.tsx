@@ -10,7 +10,8 @@ import {
   Home,
   FileText,
   Database,
-  LogOut
+  LogOut,
+  Activity
 } from 'lucide-react';
 
 // Import contexts
@@ -29,6 +30,7 @@ import ProductManagement from './inventory/tabs/ProductManagement';
 import QuickSale from './inventory/tabs/QuickSale';
 import PartyManagement from './inventory/tabs/PartyManagement';
 import Reports from './inventory/tabs/Reports';
+import InventoryLedger from './inventory/tabs/InventoryLedger';
 
 // Import utilities
 import { isBackupDue } from '../../lib/backup-utils';
@@ -120,6 +122,7 @@ function InventoryApp() {
       case 'products': return 'Products';
       case 'quick-sale': return 'Quick Sale';
       case 'party': return 'Party Purchases';
+      case 'ledger': return 'Inventory Ledger';
       case 'reports': return 'Reports';
       default: return 'Dashboard';
     }
@@ -135,6 +138,8 @@ function InventoryApp() {
         return <QuickSale onNavigate={handleNavigate} />;
       case 'party':
         return <PartyManagement onNavigate={handleNavigate} />;
+      case 'ledger':
+        return <InventoryLedger onNavigate={handleNavigate} />;
       case 'reports':
         return <Reports onNavigate={handleNavigate} />;
       default:
@@ -164,6 +169,7 @@ function InventoryApp() {
                 <button onClick={() => handleNavigate('products')} className={`nav-link ${currentView === 'products' ? 'nav-link-active' : ''}`}><Package className="h-4 w-4 mr-2" />Products</button>
                 <button onClick={() => handleNavigate('quick-sale')} className={`nav-link ${currentView === 'quick-sale' ? 'nav-link-active' : ''}`}><ShoppingCart className="h-4 w-4 mr-2" />Quick Sale</button>
                 <button onClick={() => handleNavigate('party')} className={`nav-link ${currentView === 'party' ? 'nav-link-active' : ''}`}><Users className="h-4 w-4 mr-2" />Party</button>
+                <button onClick={() => handleNavigate('ledger')} className={`nav-link ${currentView === 'ledger' ? 'nav-link-active' : ''}`}><Activity className="h-4 w-4 mr-2" />Ledger</button>
                 <button onClick={() => handleNavigate('reports')} className={`nav-link ${currentView === 'reports' ? 'nav-link-active' : ''}`}><FileText className="h-4 w-4 mr-2" />Reports</button>
               </div>
             </div>
@@ -183,6 +189,7 @@ function InventoryApp() {
             <button onClick={() => handleNavigate('products')} className="mobile-nav-link"><Package className="h-5 w-5 mr-3" />Products</button>
             <button onClick={() => handleNavigate('quick-sale')} className="mobile-nav-link"><ShoppingCart className="h-5 w-5 mr-3" />Quick Sale</button>
             <button onClick={() => handleNavigate('party')} className="mobile-nav-link"><Users className="h-5 w-5 mr-3" />Party</button>
+            <button onClick={() => handleNavigate('ledger')} className="mobile-nav-link"><Activity className="h-5 w-5 mr-3" />Ledger</button>
             <button onClick={() => handleNavigate('reports')} className="mobile-nav-link"><FileText className="h-5 w-5 mr-3" />Reports</button>
             <button onClick={handleSignOut} className="mobile-nav-link text-red-600 border-t pt-2"><LogOut className="h-5 w-5 mr-3" />Sign Out</button>
           </div>

@@ -269,6 +269,9 @@ export default function BackupRestore({ onClose, showToast }: BackupRestoreProps
                 <p className="text-sm text-gray-600">
                   <strong>Party Purchases:</strong> {restorePreview.metadata.totalPartyPurchases}
                 </p>
+                <p className="text-sm text-gray-600">
+                  <strong>Inventory Ledger:</strong> {restorePreview.metadata.totalInventoryTransactions || restorePreview.inventoryTransactions?.length || 0}
+                </p>
               </div>
 
               <div className="flex gap-3">
@@ -431,6 +434,7 @@ export default function BackupRestore({ onClose, showToast }: BackupRestoreProps
                       <li>All products and stock levels</li>
                       <li>Sales history and transactions</li>
                       <li>Party purchases and transfers</li>
+                      <li>Inventory ledger audit trail</li>
                     </ul>
                   </div>
                 </div>

@@ -15,7 +15,7 @@ import {
   getProducts,
   getSalesByDate,
   createSale,
-  updateProduct,
+  adjustProductStock,
   markDamagedStock,
   createProduct,
   getClosingStockForYear,
@@ -77,6 +77,7 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
   const [showAddStockModal, setShowAddStockModal] = useState(false);
   const [addStockProduct, setAddStockProduct] = useState<Product | null>(null);
   const [addStockQuantity, setAddStockQuantity] = useState(0);
+  const [addStockReason, setAddStockReason] = useState('Stock added during quick sale');
   const [showDamageModal, setShowDamageModal] = useState(false);
   const [damageProduct, setDamageProduct] = useState<Product | null>(null);
   const [damageQuantity, setDamageQuantity] = useState(1);
@@ -285,29 +286,26 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
 
   const handleAddStock = async (customDate: string = saleDate) => {
     if (!addStockProduct || addStockQuantity <= 0) return;
+    if (!addStockReason.trim()) {
+      showToast('Reason is required for stock adjustment', 'warning');
+      return;
+    }
     try {
-      const stockBefore = addStockProduct.stock_quantity;
-      const stockAfter = stockBefore + addStockQuantity;
-      
-      await updateProduct(addStockProduct.id, { stock_quantity: stockAfter });
-      
-      await addProductHistory({
-        product_id: addStockProduct.id,
-        product_name: addStockProduct.name,
-        action: 'stock_added',
-        quantity_change: addStockQuantity,
-        stock_before: stockBefore,
-        stock_after: stockAfter,
-        date: customDate,
-        notes: `Stock added via Quick Sale manual adjustment`
+      const updatedProduct = await adjustProductStock({
+        product: addStockProduct,
+        mode: 'add',
+        quantity: addStockQuantity,
+        reason: addStockReason,
+        date: customDate
       });
 
-      setProducts(prev => prev.map(p => p.id === addStockProduct.id ? { ...p, stock_quantity: stockAfter } : p));
-      setCart(prev => prev.map(item => item.product.id === addStockProduct.id ? { ...item, product: { ...item.product, stock_quantity: stockAfter } } : item));
+      setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
+      setCart(prev => prev.map(item => item.product.id === updatedProduct.id ? { ...item, product: { ...item.product, stock_quantity: updatedProduct.stock_quantity } } : item));
       setShowAddStockModal(false);
+      setAddStockReason('Stock added during quick sale');
       showToast('Stock added successfully', 'success');
     } catch (error) {
-      showToast('Error adding stock', 'error');
+      showToast(error instanceof Error ? error.message : 'Error adding stock', 'error');
     }
   };
 
@@ -502,7 +500,7 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
                   {item.quantity > item.product.stock_quantity && (
                     <div className="mt-2 text-red-600 text-xs flex items-center gap-2">
                       <span>Insufficient stock!</span>
-                      <button onClick={() => {setAddStockProduct(item.product); setAddStockQuantity(item.quantity - item.product.stock_quantity); setShowAddStockModal(true);}} className="bg-primary-500 text-white px-2 py-0.5 rounded">Add Stock</button>
+                      <button onClick={() => {setAddStockProduct(item.product); setAddStockQuantity(item.quantity - item.product.stock_quantity); setAddStockReason('Stock added during quick sale'); setShowAddStockModal(true);}} className="bg-primary-500 text-white px-2 py-0.5 rounded">Add Stock</button>
                     </div>
                   )}
                 </div>
@@ -575,6 +573,15 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
               <button onClick={() => setAddStockQuantity(Math.max(1, addStockQuantity - 1))} className="btn-outline px-3">-</button>
               <input type="number" value={addStockQuantity} onChange={(e) => setAddStockQuantity(parseInt(e.target.value) || 1)} className="input-field text-center" />
               <button onClick={() => setAddStockQuantity(addStockQuantity + 1)} className="btn-outline px-3">+</button>
+            </div>
+            <div className="mb-6">
+              <label className="block text-xs font-medium text-gray-500 mb-1">Reason Required</label>
+              <textarea
+                value={addStockReason}
+                onChange={(e) => setAddStockReason(e.target.value)}
+                className="input-field text-sm min-h-[80px]"
+                placeholder="Why is stock being added?"
+              />
             </div>
             <div className="flex gap-3">
               <button onClick={() => handleAddStock((window as any)._tempAddStockDate || saleDate)} className="btn-primary flex-1">Add Stock</button>

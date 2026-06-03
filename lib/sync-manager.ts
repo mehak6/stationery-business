@@ -5,7 +5,15 @@ import { getSyncMetaDB } from './pouchdb-client';
 import { checkSupabaseStatus } from './supabase-status';
 
 export type SyncStatus = 'idle' | 'syncing' | 'success' | 'error' | 'paused';
-export type SyncHealth = 'fully_synced' | 'recovered_retry' | 'skipped_orphan' | 'real_failure' | 'paused';
+export type SyncHealth =
+  | 'fully_synced'
+  | 'recovered_retry'
+  | 'skipped_old_local_sale'
+  | 'skipped_orphan'
+  | 'insufficient_stock_skipped'
+  | 'local_cache_needs_refresh'
+  | 'real_failure'
+  | 'paused';
 
 export interface SyncBucketStats {
   push: number;
@@ -13,6 +21,7 @@ export interface SyncBucketStats {
   errors: number;
   skipped?: number;
   recovered?: number;
+  details?: string[];
 }
 
 export interface SyncResult {
@@ -29,6 +38,7 @@ export interface SyncResult {
   totalErrors: number;
   totalSkipped: number;
   totalRecovered: number;
+  details?: string[];
   duration: number;
   error?: string;
 }
@@ -235,23 +245,39 @@ const syncWithRetry = async (
       (stats.categories.recovered || 0) +
       (stats.partyPurchases.recovered || 0);
 
+    const details = [
+      ...(stats.products.details || []),
+      ...(stats.sales.details || []),
+      ...(stats.categories.details || []),
+      ...(stats.partyPurchases.details || [])
+    ];
+
+    const health: SyncHealth = totalErrors > 0
+      ? 'real_failure'
+      : totalRecovered > 0
+        ? 'recovered_retry'
+        : details.some(detail => detail.startsWith('insufficient_stock_skipped'))
+          ? 'insufficient_stock_skipped'
+          : details.some(detail => detail.startsWith('skipped_old_local_sale'))
+            ? 'skipped_old_local_sale'
+            : details.some(detail => detail.startsWith('skipped_orphan'))
+              ? 'local_cache_needs_refresh'
+              : totalSkipped > 0
+                ? 'skipped_orphan'
+                : 'fully_synced';
+
     const duration = Date.now() - startTime;
 
     const result: SyncResult = {
       status: totalErrors > 0 ? 'error' : 'success',
-      health: totalErrors > 0
-        ? 'real_failure'
-        : totalSkipped > 0
-          ? 'skipped_orphan'
-          : totalRecovered > 0
-            ? 'recovered_retry'
-            : 'fully_synced',
+      health,
       timestamp: new Date().toISOString(),
       stats,
       totalSynced,
       totalErrors,
       totalSkipped,
       totalRecovered,
+      details,
       duration
     };
 
@@ -544,6 +570,7 @@ export const getSyncStats = async () => {
     totalErrors: lastResult?.totalErrors || 0,
     totalSkipped: lastResult?.totalSkipped || 0,
     totalRecovered: lastResult?.totalRecovered || 0,
+    details: lastResult?.details || [],
     isSyncing,
     isQueued,
     autoSyncEnabled: currentConfig.autoSync,

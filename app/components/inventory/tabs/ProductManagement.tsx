@@ -25,7 +25,8 @@ import {
   getClosingStockForYear,
   getSalesByProduct,
   getPartyPurchases,
-  updatePartyPurchase
+  adjustProductStock,
+  type StockAdjustmentMode
 } from 'lib/offline-adapter';
 import { addProductHistory, getProductHistory, removeHistoryEntry } from 'lib/product-history';
 import { formatDateToDisplay, parseDisplayDate } from 'lib/date-utils';
@@ -151,6 +152,14 @@ export default function ProductManagement({ onNavigate }: ProductManagementProps
   const startEditing = (productId: string, fieldName: string, currentValue: any) => {
     if (!isCurrentYear) {
       showToast('Editing is not allowed in historical records.', 'error');
+      return;
+    }
+    if (fieldName === 'stock_quantity') {
+      const product = products.find(p => p.id === productId);
+      if (product) {
+        setSelectedProductForAddStock(product);
+        setShowAddStock(true);
+      }
       return;
     }
     setEditingProduct(productId);
@@ -586,7 +595,7 @@ export default function ProductManagement({ onNavigate }: ProductManagementProps
                           setShowAddStock(true);
                         }}
                         className="p-1 text-gray-400 hover:text-green-600"
-                        title="Add Stock"
+                        title="Adjust Stock"
                       >
                         <Plus className="h-5 w-5" />
                       </button>
@@ -653,7 +662,7 @@ export default function ProductManagement({ onNavigate }: ProductManagementProps
                           setShowAddStock(true);
                         }}
                         className="p-1 text-gray-400 hover:text-green-600"
-                        title="Add Stock"
+                        title="Adjust Stock"
                       >
                         <Plus className="h-4 w-4" />
                       </button>
@@ -1339,14 +1348,24 @@ function BulkProductEntryModal({ onClose, onProductsAdded }: { onClose: () => vo
 }
 
 function AddStockModal({ product, onClose, onStockUpdated }: { product: Product; onClose: () => void; onStockUpdated: (p: Product) => void }) {
+  const [mode, setMode] = useState<StockAdjustmentMode>('add');
   const [quantity, setQuantity] = useState(1);
+  const [targetStock, setTargetStock] = useState(product.stock_quantity);
+  const [reason, setReason] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [displayDate, setDisplayDate] = useState(formatDateToDisplay(date));
   const [loading, setLoading] = useState(false);
   const [partyPurchases, setPartyPurchases] = useState<PartyPurchase[]>([]);
   const [selectedPartyPurchase, setSelectedPartyPurchase] = useState<PartyPurchase | null>(null);
-  const [isTransferMode, setIsTransferMode] = useState(false);
   const { showToast } = useToast();
+
+  const modeOptions: Array<{ value: StockAdjustmentMode; label: string; description: string }> = [
+    { value: 'add', label: 'Add', description: 'Increase stock manually' },
+    { value: 'reduce', label: 'Reduce', description: 'Reduce stock manually' },
+    { value: 'damaged', label: 'Damaged', description: 'Remove damaged stock' },
+    { value: 'correction', label: 'Correction', description: 'Set exact stock' },
+    { value: 'party_transfer', label: 'Transfer', description: 'Move from party purchase' }
+  ];
 
   useEffect(() => {
     const fetchPartyStock = async () => {
@@ -1355,12 +1374,10 @@ function AddStockModal({ product, onClose, onStockUpdated }: { product: Product;
         const matches = allPurchases
           .filter(p => p.item_name.toUpperCase() === product.name.toUpperCase() && p.remaining_quantity > 0)
           .sort((a, b) => new Date(b.purchase_date).getTime() - new Date(a.purchase_date).getTime());
-        
+
         setPartyPurchases(matches);
         if (matches.length > 0) {
           setSelectedPartyPurchase(matches[0]);
-          setIsTransferMode(true);
-          setQuantity(Math.min(1, matches[0].remaining_quantity));
         }
       } catch (error) {
         console.error('Error fetching party stock:', error);
@@ -1369,52 +1386,60 @@ function AddStockModal({ product, onClose, onStockUpdated }: { product: Product;
     fetchPartyStock();
   }, [product.name]);
 
-  const handleAddStock = async () => {
-    if (quantity <= 0) return;
-    if (isTransferMode && selectedPartyPurchase && quantity > selectedPartyPurchase.remaining_quantity) {
-      showToast('Cannot transfer more than available party stock', 'error');
+  useEffect(() => {
+    if (mode === 'party_transfer' && selectedPartyPurchase) {
+      setQuantity(current => Math.min(Math.max(1, current), selectedPartyPurchase.remaining_quantity));
+    }
+    if (mode === 'correction') {
+      setTargetStock(product.stock_quantity);
+    }
+  }, [mode, selectedPartyPurchase, product.stock_quantity]);
+
+  const getPreviewStock = () => {
+    if (mode === 'correction') return Math.max(0, targetStock || 0);
+    if (mode === 'add' || mode === 'party_transfer') return product.stock_quantity + quantity;
+    return product.stock_quantity - quantity;
+  };
+
+  const maxQuantity = mode === 'party_transfer'
+    ? selectedPartyPurchase?.remaining_quantity || 0
+    : product.stock_quantity;
+
+  const handleAdjustStock = async () => {
+    if (!reason.trim()) {
+      showToast('Reason is required for stock adjustment', 'warning');
+      return;
+    }
+    if (mode !== 'correction' && quantity <= 0) {
+      showToast('Quantity must be greater than zero', 'warning');
+      return;
+    }
+    if ((mode === 'reduce' || mode === 'damaged') && quantity > product.stock_quantity) {
+      showToast(`Only ${product.stock_quantity} units are available`, 'error');
+      return;
+    }
+    if (mode === 'party_transfer' && (!selectedPartyPurchase || quantity > selectedPartyPurchase.remaining_quantity)) {
+      showToast('Select valid party stock for transfer', 'error');
       return;
     }
 
     setLoading(true);
     try {
-      const stockBefore = product.stock_quantity;
-      const stockAfter = stockBefore + quantity;
-
-      // 1. Update Product Stock
-      await updateProduct(product.id, { stock_quantity: stockAfter });
-
-      // 2. If Transfer Mode, update Party Purchase
-      if (isTransferMode && selectedPartyPurchase) {
-        await updatePartyPurchase(selectedPartyPurchase.id, {
-          remaining_quantity: selectedPartyPurchase.remaining_quantity - quantity
-        });
-      }
-
-      // 3. Add History
-      await addProductHistory({
-        product_id: product.id,
-        product_name: product.name,
-        action: 'stock_added',
-        quantity_change: quantity,
-        stock_before: stockBefore,
-        stock_after: stockAfter,
-        date: date,
-        notes: isTransferMode && selectedPartyPurchase 
-          ? `Transferred ${quantity} units from ${selectedPartyPurchase.party_name} purchase`
-          : `Added ${quantity} units manually`
+      const updatedProduct = await adjustProductStock({
+        product,
+        mode,
+        quantity,
+        targetStock,
+        reason,
+        date,
+        partyPurchase: selectedPartyPurchase
       });
 
-      onStockUpdated({ ...product, stock_quantity: stockAfter });
-      showToast(
-        isTransferMode 
-          ? `Transferred ${quantity} units from ${selectedPartyPurchase?.party_name}`
-          : `Added ${quantity} units manually to ${product.name}`, 
-        'success'
-      );
+      onStockUpdated(updatedProduct);
+      showToast('Stock adjustment saved with ledger entry', 'success');
     } catch (error) {
-      console.error('Error adding stock:', error);
-      showToast('Error adding stock', 'error');
+      console.error('Error adjusting stock:', error);
+      showToast(error instanceof Error ? error.message : 'Error adjusting stock', 'error');
     } finally {
       setLoading(false);
     }
@@ -1422,35 +1447,59 @@ function AddStockModal({ product, onClose, onStockUpdated }: { product: Product;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[9999] backdrop-blur-sm">
-      <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl">
+      <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-start mb-2">
-          <h3 className="text-xl font-black text-gray-900">Add Stock</h3>
+          <h3 className="text-xl font-black text-gray-900">Adjust Stock</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="h-6 w-6" /></button>
         </div>
         <p className="text-sm font-bold text-primary-600 uppercase tracking-widest mb-4">{product.name}</p>
-        
-        {partyPurchases.length > 0 && (
-          <div className={`mb-6 p-4 rounded-xl border-2 transition-all ${isTransferMode ? 'bg-primary-50 border-primary-200' : 'bg-gray-50 border-gray-100 opacity-60'}`}>
+
+        <div className="grid grid-cols-2 gap-3 mb-5">
+          <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+            <p className="text-[10px] uppercase font-black text-gray-400">Current</p>
+            <p className="text-2xl font-black text-gray-900">{product.stock_quantity}</p>
+          </div>
+          <div className="bg-primary-50 rounded-xl p-3 border border-primary-100">
+            <p className="text-[10px] uppercase font-black text-primary-500">After</p>
+            <p className={`text-2xl font-black ${getPreviewStock() < 0 ? 'text-red-600' : 'text-primary-700'}`}>
+              {getPreviewStock()}
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-5">
+          {modeOptions.map(option => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => setMode(option.value)}
+              title={option.description}
+              className={`py-2 px-3 rounded-xl text-xs font-black border transition-colors ${
+                mode === option.value
+                  ? 'bg-primary-600 text-white border-primary-600'
+                  : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+
+        {mode === 'party_transfer' && (
+          <div className="mb-5 p-4 rounded-xl border-2 bg-primary-50 border-primary-200">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-[10px] font-black uppercase text-primary-700 tracking-wider">Party Stock Available</span>
-              <button 
-                onClick={() => setIsTransferMode(!isTransferMode)}
-                className={`text-[10px] font-black uppercase px-2 py-1 rounded-md transition-all ${isTransferMode ? 'bg-white text-primary-600 shadow-sm' : 'bg-primary-600 text-white'}`}
-              >
-                {isTransferMode ? 'Switch to Manual' : 'Switch to Transfer'}
-              </button>
+              <span className="text-[10px] font-black uppercase text-primary-700 tracking-wider">Party Stock</span>
+              <span className="text-[10px] font-black uppercase text-primary-500">{partyPurchases.length} source(s)</span>
             </div>
-            
-            {isTransferMode ? (
+
+            {partyPurchases.length > 0 ? (
               <div className="space-y-3">
-                <select 
-                  value={selectedPartyPurchase?.id}
+                <select
+                  value={selectedPartyPurchase?.id || ''}
                   onChange={(e) => {
                     const found = partyPurchases.find(p => p.id === e.target.value);
-                    if (found) {
-                      setSelectedPartyPurchase(found);
-                      setQuantity(Math.min(quantity, found.remaining_quantity));
-                    }
+                    setSelectedPartyPurchase(found || null);
+                    if (found) setQuantity(Math.min(quantity, found.remaining_quantity));
                   }}
                   className="w-full bg-white border border-primary-100 rounded-lg p-2 text-sm font-bold text-primary-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
                 >
@@ -1460,57 +1509,68 @@ function AddStockModal({ product, onClose, onStockUpdated }: { product: Product;
                     </option>
                   ))}
                 </select>
-                <p className="text-[10px] text-primary-600 font-bold italic">
-                  * Deducting from "{selectedPartyPurchase?.party_name}" purchase record.
+                <p className="text-[10px] text-primary-600 font-bold">
+                  Party stock will reduce and product stock will increase in the same adjustment.
                 </p>
               </div>
             ) : (
-              <p className="text-xs font-bold text-gray-400">Transfer mode disabled. This will be a generic manual stock addition.</p>
+              <p className="text-xs font-bold text-primary-700">No matching party stock is available for this product.</p>
             )}
           </div>
         )}
 
         <div className="space-y-4">
-          <div>
-            <label className="block text-[10px] uppercase font-black text-gray-400 mb-1 ml-1">
-              {isTransferMode ? 'Quantity to Transfer' : 'Quantity to Add'}
-            </label>
-            <div className="flex items-center gap-3">
-              <button 
-                onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                className="w-12 h-12 flex items-center justify-center rounded-xl bg-gray-100 hover:bg-gray-200 font-black text-xl transition-colors"
-              >
-                -
-              </button>
-              <input 
-                type="number" 
-                value={quantity} 
-                onChange={(e) => {
-                  let val = parseInt(e.target.value) || 0;
-                  if (isTransferMode && selectedPartyPurchase) {
-                    val = Math.min(val, selectedPartyPurchase.remaining_quantity);
-                  }
-                  setQuantity(Math.max(1, val));
-                }}
-                className="flex-1 h-12 bg-gray-50 border-2 border-gray-100 rounded-xl text-center font-black text-xl focus:outline-none focus:border-primary-500"
+          {mode === 'correction' ? (
+            <div>
+              <label className="block text-[10px] uppercase font-black text-gray-400 mb-1 ml-1">Correct Stock To</label>
+              <input
+                type="number"
+                min="0"
+                value={targetStock}
+                onChange={(e) => setTargetStock(Math.max(0, parseInt(e.target.value) || 0))}
+                className="w-full h-12 bg-gray-50 border-2 border-gray-100 rounded-xl text-center font-black text-xl focus:outline-none focus:border-primary-500"
               />
-              <button 
-                onClick={() => {
-                  let nextVal = quantity + 1;
-                  if (isTransferMode && selectedPartyPurchase) {
-                    nextVal = Math.min(nextVal, selectedPartyPurchase.remaining_quantity);
-                  }
-                  setQuantity(nextVal);
-                }}
-                className="w-12 h-12 flex items-center justify-center rounded-xl bg-gray-100 hover:bg-gray-200 font-black text-xl transition-colors"
-              >
-                +
-              </button>
             </div>
-            {isTransferMode && selectedPartyPurchase && (
-              <p className="text-[10px] text-right mt-1 font-black text-primary-400 uppercase">Max: {selectedPartyPurchase.remaining_quantity} Units</p>
-            )}
-          </div>
+          ) : (
+            <div>
+              <label className="block text-[10px] uppercase font-black text-gray-400 mb-1 ml-1">
+                {mode === 'add' ? 'Quantity to Add' : mode === 'party_transfer' ? 'Quantity to Transfer' : 'Quantity to Remove'}
+              </label>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                  className="w-12 h-12 flex items-center justify-center rounded-xl bg-gray-100 hover:bg-gray-200 font-black text-xl transition-colors"
+                >
+                  -
+                </button>
+                <input
+                  type="number"
+                  min="1"
+                  value={quantity}
+                  onChange={(e) => {
+                    let val = parseInt(e.target.value) || 1;
+                    if (mode !== 'add') {
+                      val = Math.min(val, maxQuantity || val);
+                    }
+                    setQuantity(Math.max(1, val));
+                  }}
+                  className="flex-1 h-12 bg-gray-50 border-2 border-gray-100 rounded-xl text-center font-black text-xl focus:outline-none focus:border-primary-500"
+                />
+                <button
+                  onClick={() => {
+                    const nextVal = mode === 'add' ? quantity + 1 : Math.min(quantity + 1, maxQuantity || quantity + 1);
+                    setQuantity(nextVal);
+                  }}
+                  className="w-12 h-12 flex items-center justify-center rounded-xl bg-gray-100 hover:bg-gray-200 font-black text-xl transition-colors"
+                >
+                  +
+                </button>
+              </div>
+              {mode !== 'add' && (
+                <p className="text-[10px] text-right mt-1 font-black text-primary-400 uppercase">Max: {maxQuantity} Units</p>
+              )}
+            </div>
+          )}
 
           <div>
             <label className="block text-[10px] uppercase font-black text-gray-400 mb-1 ml-1">Date (dd/mm/yyyy)</label>
@@ -1529,21 +1589,31 @@ function AddStockModal({ product, onClose, onStockUpdated }: { product: Product;
               />
             </div>
           </div>
+
+          <div>
+            <label className="block text-[10px] uppercase font-black text-gray-400 mb-1 ml-1">Reason Required</label>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Example: damaged pieces found, counted stock correction, new stock received"
+              className="w-full min-h-[88px] bg-gray-50 border-2 border-gray-100 rounded-xl p-3 font-bold text-sm text-gray-900 focus:outline-none focus:border-primary-500"
+            />
+          </div>
         </div>
 
         <div className="flex gap-3 mt-8">
-          <button 
+          <button
             onClick={onClose}
             className="flex-1 py-3 px-4 rounded-xl font-bold text-gray-500 hover:bg-gray-50 transition-colors"
           >
             Cancel
           </button>
-          <button 
-            onClick={handleAddStock}
-            disabled={loading}
-            className={`flex-1 py-3 px-4 rounded-xl text-white font-black shadow-lg transition-all transform active:scale-95 disabled:opacity-50 ${isTransferMode ? 'bg-primary-600 hover:bg-primary-700 shadow-primary-100' : 'bg-gray-900 hover:bg-gray-800 shadow-gray-200'}`}
+          <button
+            onClick={handleAdjustStock}
+            disabled={loading || (mode === 'party_transfer' && partyPurchases.length === 0)}
+            className="flex-1 py-3 px-4 rounded-xl text-white font-black shadow-lg transition-all transform active:scale-95 disabled:opacity-50 bg-gray-900 hover:bg-gray-800 shadow-gray-200"
           >
-            {loading ? 'Processing...' : (isTransferMode ? 'Transfer Now' : 'Add Now')}
+            {loading ? 'Saving...' : 'Save Adjustment'}
           </button>
         </div>
       </div>

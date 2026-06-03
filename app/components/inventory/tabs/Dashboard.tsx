@@ -11,7 +11,9 @@ import {
   Edit,
   Trash2,
   X,
-  RefreshCw
+  RefreshCw,
+  Download,
+  Database
 } from 'lucide-react';
 import {
   getProducts,
@@ -30,6 +32,7 @@ import { formatDateToDDMMYYYY, parseDDMMYYYYToISO, getCurrentDateISO, getCurrent
 import type { Product, Sale } from 'supabase_client';
 import { useToast } from 'app/context/ToastContext';
 import { useSyncStatus } from 'hooks/useSyncStatus';
+import { exportDataset } from 'lib/backup-utils';
 
 interface DashboardProps {
   onNavigate: (view: string) => void;
@@ -41,7 +44,10 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   const syncHealthLabel: Record<string, string> = {
     fully_synced: 'Fully synced',
     recovered_retry: 'Recovered retry',
+    skipped_old_local_sale: 'Skipped old local sale',
     skipped_orphan: 'Skipped orphan records',
+    insufficient_stock_skipped: 'Insufficient stock skipped',
+    local_cache_needs_refresh: 'Local cache needs refresh',
     real_failure: 'Real failure',
     paused: 'Paused'
   };
@@ -187,6 +193,20 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       showToast('Refresh failed, showing local data', 'warning');
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleExport = async (
+    dataset: 'products' | 'sales' | 'party_purchases' | 'inventory_transactions' | 'full_backup',
+    label: string
+  ) => {
+    try {
+      showToast(`Preparing ${label} export...`, 'info');
+      await exportDataset(dataset);
+      showToast(`${label} export downloaded`, 'success');
+    } catch (error) {
+      console.error('Export failed:', error);
+      showToast(`Failed to export ${label}`, 'error');
     }
   };
 
@@ -413,12 +433,41 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
             <span>Status: {isSyncing ? 'Retrying / Syncing' : syncHealthLabel[stats.syncHealth] || syncStatus}</span>
           </div>
         </div>
+        {stats.details && stats.details.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {Array.from(new Set(stats.details)).slice(0, 5).map(detail => (
+              <span key={detail} className="text-[11px] font-bold bg-gray-100 text-gray-700 rounded-full px-3 py-1">
+                {detail.replace(/_/g, ' ').replace(':', ': ')}
+              </span>
+            ))}
+          </div>
+        )}
         {supabaseStatus === 'paused' && (
           <div className="mt-3 text-sm font-semibold text-orange-700 bg-orange-50 border border-orange-200 rounded-xl p-2">
             Sync is paused because Supabase project is paused. Resume project to save cloud updates.
           </div>
         )}
-        {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
+      {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
+      </div>
+
+      {/* Data Exports */}
+      <div className="mb-6 bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <Database className="h-6 w-6 text-primary-600" />
+            <div>
+              <p className="text-sm font-black text-gray-900">Data Exports</p>
+              <p className="text-xs text-gray-500">Download products, sales, party purchases, ledger, or a full JSON backup.</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+            <button onClick={() => handleExport('products', 'Products')} className="btn-outline text-xs flex items-center justify-center gap-1"><Download className="h-3.5 w-3.5" />Products</button>
+            <button onClick={() => handleExport('sales', 'Sales')} className="btn-outline text-xs flex items-center justify-center gap-1"><Download className="h-3.5 w-3.5" />Sales</button>
+            <button onClick={() => handleExport('party_purchases', 'Party Purchases')} className="btn-outline text-xs flex items-center justify-center gap-1"><Download className="h-3.5 w-3.5" />Party</button>
+            <button onClick={() => handleExport('inventory_transactions', 'Inventory Ledger')} className="btn-outline text-xs flex items-center justify-center gap-1"><Download className="h-3.5 w-3.5" />Ledger</button>
+            <button onClick={() => handleExport('full_backup', 'Full Backup')} className="btn-primary text-xs flex items-center justify-center gap-1"><Download className="h-3.5 w-3.5" />Full JSON</button>
+          </div>
+        </div>
       </div>
 
       {/* Analytics Cards */}

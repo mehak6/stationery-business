@@ -12,6 +12,7 @@
 
 import { supabase } from '../supabase_client';
 import type { 
+  Database,
   Product, 
   Sale, 
   Category,
@@ -57,6 +58,22 @@ export const subscribeToOnlineStatus = (callback: (online: boolean) => void) => 
 
 // ==================== PRODUCTS ====================
 
+export type InventoryTransaction = Database['public']['Tables']['inventory_transactions']['Row'] & {
+  products?: { name: string } | null;
+};
+
+export type StockAdjustmentMode = 'add' | 'reduce' | 'damaged' | 'correction' | 'party_transfer';
+
+export interface StockAdjustmentInput {
+  product: Product;
+  mode: StockAdjustmentMode;
+  quantity?: number;
+  targetStock?: number;
+  reason: string;
+  date?: string;
+  partyPurchase?: PartyPurchase | null;
+}
+
 export const getProducts = async (limit?: number): Promise<Product[]> => {
   try {
     if (isOnline) {
@@ -85,6 +102,37 @@ export const getProducts = async (limit?: number): Promise<Product[]> => {
     return await OfflineDB.getAllProducts();
     }
     };
+
+export const getInventoryTransactions = async (
+  limit: number = 500,
+  filters: { productId?: string; action?: string } = {}
+): Promise<InventoryTransaction[]> => {
+  if (!isOnline) {
+    return [];
+  }
+
+  let query = (supabase.from('inventory_transactions') as any)
+    .select(`
+      *,
+      products (
+        name
+      )
+    `)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (filters.productId) {
+    query = query.eq('product_id', filters.productId);
+  }
+
+  if (filters.action) {
+    query = query.eq('action', filters.action);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return data || [];
+};
 
 
 export const createProduct = async (product: ProductInsert): Promise<Product> => {
@@ -159,7 +207,7 @@ export const updateProduct = async (productId: string, updates: Partial<ProductI
   }
 };
 
-const recordInventoryTransaction = async (entry: {
+export const recordInventoryTransaction = async (entry: {
   product_id: string;
   action: string;
   quantity_change: number;
@@ -192,55 +240,181 @@ const recordInventoryTransaction = async (entry: {
   }
 };
 
+const getAdjustmentAction = (mode: StockAdjustmentMode): string => {
+  switch (mode) {
+    case 'add':
+      return 'manual_stock_added';
+    case 'reduce':
+      return 'manual_stock_reduced';
+    case 'damaged':
+      return 'damaged_stock_removed';
+    case 'party_transfer':
+      return 'party_transfer';
+    case 'correction':
+    default:
+      return 'stock_repair';
+  }
+};
+
+const getAdjustmentHistoryAction = (mode: StockAdjustmentMode, quantityChange: number) => {
+  if (mode === 'damaged') return 'damaged_stock_removed';
+  if (quantityChange > 0) return 'stock_added';
+  return 'stock_updated';
+};
+
+const buildStockAdjustment = (input: StockAdjustmentInput) => {
+  const cleanReason = input.reason.trim();
+  if (!cleanReason) {
+    throw new Error('Reason is required for stock adjustment');
+  }
+
+  const stockBefore = Number(input.product.stock_quantity || 0);
+  const quantity = Math.floor(Number(input.quantity || 0));
+  const targetStock = Math.floor(Number(input.targetStock || 0));
+
+  let stockAfter = stockBefore;
+  let quantityChange = 0;
+
+  if (input.mode === 'correction') {
+    if (!Number.isFinite(targetStock) || targetStock < 0) {
+      throw new Error('Corrected stock must be zero or more');
+    }
+    stockAfter = targetStock;
+    quantityChange = stockAfter - stockBefore;
+  } else {
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw new Error('Quantity must be greater than zero');
+    }
+
+    if (input.mode === 'add' || input.mode === 'party_transfer') {
+      quantityChange = quantity;
+      stockAfter = stockBefore + quantity;
+    } else {
+      quantityChange = -quantity;
+      stockAfter = stockBefore - quantity;
+    }
+  }
+
+  if (stockAfter < 0) {
+    throw new Error(`Cannot reduce below zero. Available: ${stockBefore}, Requested: ${Math.abs(quantityChange)}`);
+  }
+
+  if (input.mode === 'party_transfer') {
+    if (!input.partyPurchase) {
+      throw new Error('Select a party purchase to transfer stock');
+    }
+    if (quantity > input.partyPurchase.remaining_quantity) {
+      throw new Error(`Cannot transfer more than party stock. Available: ${input.partyPurchase.remaining_quantity}`);
+    }
+  }
+
+  return {
+    stockBefore,
+    stockAfter,
+    quantityChange,
+    quantity: Math.abs(quantityChange),
+    action: getAdjustmentAction(input.mode),
+    reason: cleanReason,
+    date: input.date || new Date().toISOString().split('T')[0]
+  };
+};
+
+const adjustProductStockWithoutRpc = async (input: StockAdjustmentInput): Promise<Product> => {
+  const adjustment = buildStockAdjustment(input);
+
+  const updatedProduct = await updateProduct(input.product.id, {
+    stock_quantity: adjustment.stockAfter
+  });
+
+  if (input.mode === 'party_transfer' && input.partyPurchase) {
+    await updatePartyPurchase(input.partyPurchase.id, {
+      remaining_quantity: input.partyPurchase.remaining_quantity - adjustment.quantity
+    });
+  }
+
+  await recordInventoryTransaction({
+    product_id: input.product.id,
+    action: adjustment.action,
+    quantity_change: adjustment.quantityChange,
+    stock_before: adjustment.stockBefore,
+    stock_after: adjustment.stockAfter,
+    reason: adjustment.reason,
+    metadata: {
+      product_name: input.product.name,
+      adjustment_mode: input.mode,
+      adjustment_date: adjustment.date,
+      party_purchase_id: input.partyPurchase?.id || null,
+      party_name: input.partyPurchase?.party_name || null
+    }
+  });
+
+  return {
+    ...updatedProduct,
+    stock_quantity: adjustment.stockAfter
+  } as Product;
+};
+
+export const adjustProductStock = async (input: StockAdjustmentInput): Promise<Product> => {
+  const adjustment = buildStockAdjustment(input);
+
+  if (!isOnline) {
+    throw new Error('Stock adjustments require internet so the inventory ledger can be written');
+  }
+
+  let updatedProduct: Product | null = null;
+
+  const rpcResult = await (supabase.rpc as any)('adjust_product_stock', {
+    p_product_id: input.product.id,
+    p_mode: input.mode,
+    p_quantity: input.mode === 'correction' ? null : adjustment.quantity,
+    p_target_stock: input.mode === 'correction' ? adjustment.stockAfter : null,
+    p_reason: adjustment.reason,
+    p_adjustment_date: adjustment.date,
+    p_party_purchase_id: input.partyPurchase?.id || null
+  });
+
+  if (!rpcResult.error) {
+    if (rpcResult.data?.success === false) {
+      throw new Error(rpcResult.data.error || 'Stock adjustment failed');
+    }
+
+    const remoteProduct = await fetchRemoteProduct(input.product.id);
+    if (!remoteProduct) throw new Error('Adjusted product could not be loaded');
+    updatedProduct = remoteProduct;
+  } else if (isMissingRemoteFeatureError(rpcResult.error, 'adjust_product_stock')) {
+    updatedProduct = await adjustProductStockWithoutRpc(input);
+  } else {
+    throw rpcResult.error;
+  }
+
+  await addProductHistory({
+    product_id: input.product.id,
+    product_name: input.product.name,
+    action: getAdjustmentHistoryAction(input.mode, adjustment.quantityChange) as any,
+    quantity_change: adjustment.quantityChange,
+    stock_before: adjustment.stockBefore,
+    stock_after: Number(updatedProduct.stock_quantity),
+    date: adjustment.date,
+    notes: adjustment.reason
+  });
+
+  await OfflineDB.saveProduct(updatedProduct);
+  return updatedProduct;
+};
+
 export const markDamagedStock = async (
   product: Product,
   quantity: number,
   reason: string,
   date?: string
 ): Promise<Product> => {
-  const damagedQuantity = Math.floor(Number(quantity));
-  if (!Number.isFinite(damagedQuantity) || damagedQuantity <= 0) {
-    throw new Error('Damaged quantity must be greater than zero');
-  }
-
-  if (damagedQuantity > product.stock_quantity) {
-    throw new Error(`Cannot mark more damaged stock than available. Available: ${product.stock_quantity}`);
-  }
-
-  const stockBefore = product.stock_quantity;
-  const stockAfter = stockBefore - damagedQuantity;
-  const cleanReason = reason?.trim() || 'Damaged stock removed';
-
-  const updatedProduct = await updateProduct(product.id, { stock_quantity: stockAfter });
-
-  await addProductHistory({
-    product_id: product.id,
-    product_name: product.name,
-    action: 'damaged_stock_removed',
-    quantity_change: -damagedQuantity,
-    stock_before: stockBefore,
-    stock_after: stockAfter,
-    date: date || new Date().toISOString(),
-    notes: cleanReason
+  return adjustProductStock({
+    product,
+    mode: 'damaged',
+    quantity,
+    reason: reason?.trim() || 'Damaged stock removed',
+    date
   });
-
-  await recordInventoryTransaction({
-    product_id: product.id,
-    action: 'damaged_stock_removed',
-    quantity_change: -damagedQuantity,
-    stock_before: stockBefore,
-    stock_after: stockAfter,
-    reason: cleanReason,
-    metadata: {
-      product_name: product.name,
-      adjustment_date: date || new Date().toISOString()
-    }
-  });
-
-  return {
-    ...updatedProduct,
-    stock_quantity: stockAfter
-  } as Product;
 };
 
 export const deleteProduct = async (productId: string): Promise<void> => {

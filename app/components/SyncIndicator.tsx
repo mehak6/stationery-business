@@ -26,6 +26,17 @@ export default function SyncIndicator() {
     supabaseStatus
   } = useSyncStatus();
 
+  const healthLabels: Record<string, string> = {
+    fully_synced: 'Fully synced',
+    recovered_retry: 'Recovered retry',
+    skipped_old_local_sale: 'Old local sale skipped',
+    skipped_orphan: 'Orphan skipped',
+    insufficient_stock_skipped: 'Insufficient stock skipped',
+    local_cache_needs_refresh: 'Refresh local cache',
+    real_failure: 'Real failure',
+    paused: 'Paused'
+  };
+
   const handleResume = async () => {
     setIsResuming(true);
     try {
@@ -88,9 +99,12 @@ export default function SyncIndicator() {
 
     switch (syncStatus) {
       case 'success':
-        return timeSinceLastSync ? `Synced ${timeSinceLastSync}` : 'Synced';
+        if (stats.syncHealth && stats.syncHealth !== 'fully_synced') {
+          return healthLabels[stats.syncHealth] || 'Synced with notes';
+        }
+        return timeSinceLastSync ? `Fully synced ${timeSinceLastSync}` : 'Fully synced';
       case 'error':
-        return 'Sync failed';
+        return healthLabels[stats.syncHealth] || 'Sync failed';
       case 'idle':
         return 'Not synced';
       default:
@@ -145,6 +159,11 @@ export default function SyncIndicator() {
                   {stats.totalSynced} synced
                   {stats.totalSkipped > 0 && `, ${stats.totalSkipped} skipped`}
                   {stats.totalRecovered > 0 && `, ${stats.totalRecovered} recovered`}
+                </p>
+              )}
+              {!error && stats.details && stats.details.length > 0 && (
+                <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">
+                  {stats.details[0].replace(/_/g, ' ').replace(':', ': ')}
                 </p>
               )}
             </div>

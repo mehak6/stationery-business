@@ -8,7 +8,8 @@ import {
   getSales, 
   getPartyPurchases, 
   getCategories,
-  getClosingStockForYear
+  getClosingStockForYear,
+  getInventoryTransactions
 } from './offline-adapter';
 import * as OfflineDB from './offline-db';
 
@@ -20,6 +21,7 @@ export interface BackupData {
   sales: any[];
   partyPurchases: any[];
   categories: any[];
+  inventoryTransactions: any[];
   closingStock: Record<string, number>;
   productHistory: any[];
   metadata: {
@@ -27,11 +29,12 @@ export interface BackupData {
     totalSales: number;
     totalPartyPurchases: number;
     totalCategories: number;
+    totalInventoryTransactions: number;
     backupType: 'manual' | 'automatic' | 'archive';
   };
 }
 
-const BACKUP_VERSION = '1.1.0';
+const BACKUP_VERSION = '1.2.0';
 const BACKUP_INTERVAL_KEY = 'inventory_pro_backup_interval';
 const LAST_BACKUP_KEY = 'inventory_pro_last_backup';
 
@@ -58,11 +61,12 @@ export async function createBackup(
   financialYear?: string
 ): Promise<BackupData> {
   try {
-    const [products, sales, partyPurchases, categories] = await Promise.all([
+    const [products, sales, partyPurchases, categories, inventoryTransactions] = await Promise.all([
       getProducts(),
       getSales(20000), // Get up to 20k sales
       getPartyPurchases(),
-      getCategories()
+      getCategories(),
+      getInventoryTransactions(50000)
     ]);
 
     // Fetch closing stock for specific year if archive, else for current/last known
@@ -80,6 +84,7 @@ export async function createBackup(
       sales: sales || [],
       partyPurchases: partyPurchases || [],
       categories: categories || [],
+      inventoryTransactions: inventoryTransactions || [],
       closingStock: closingStock || {},
       productHistory: productHistory || [],
       metadata: {
@@ -87,6 +92,7 @@ export async function createBackup(
         totalSales: sales?.length || 0,
         totalPartyPurchases: partyPurchases?.length || 0,
         totalCategories: categories?.length || 0,
+        totalInventoryTransactions: inventoryTransactions?.length || 0,
         backupType
       }
     };
@@ -144,6 +150,43 @@ export async function createYearEndArchive(financialYear: string): Promise<void>
 export async function createAndDownloadBackup(backupType: 'manual' | 'automatic' = 'manual'): Promise<void> {
   const backup = await createBackup(backupType);
   downloadBackup(backup);
+}
+
+export async function exportDataset(
+  dataset: 'products' | 'sales' | 'party_purchases' | 'inventory_transactions' | 'full_backup'
+): Promise<void> {
+  if (dataset === 'full_backup') {
+    await createAndDownloadBackup('manual');
+    return;
+  }
+
+  const loaders = {
+    products: () => getProducts(),
+    sales: () => getSales(50000),
+    party_purchases: () => getPartyPurchases(),
+    inventory_transactions: () => getInventoryTransactions(50000)
+  };
+
+  const rows = await loaders[dataset]();
+  const exportedAt = new Date().toISOString();
+  const payload = {
+    version: BACKUP_VERSION,
+    exportedAt,
+    dataset,
+    count: rows.length,
+    rows
+  };
+
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const filename = `inventory_${dataset}_${exportedAt.split('T')[0]}_${exportedAt.split('T')[1].slice(0, 8).replace(/:/g, '-')}.json`;
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 /**

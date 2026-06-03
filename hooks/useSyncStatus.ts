@@ -32,6 +32,7 @@ export const useSyncStatus = () => {
     totalErrors: 0,
     totalSkipped: 0,
     totalRecovered: 0,
+    details: [] as string[],
     syncHealth: 'fully_synced',
     isQueued: false
   });
@@ -89,6 +90,7 @@ export const useSyncStatus = () => {
             totalErrors: syncStats.totalErrors,
             totalSkipped: syncStats.totalSkipped,
             totalRecovered: syncStats.totalRecovered,
+            details: syncStats.details,
             syncHealth: syncStats.syncHealth,
             isQueued: syncStats.isQueued
           });
@@ -116,6 +118,7 @@ export const useSyncStatus = () => {
         totalErrors: result.totalErrors,
         totalSkipped: result.totalSkipped || 0,
         totalRecovered: result.totalRecovered || 0,
+        details: result.details || [],
         syncHealth: result.health || 'fully_synced'
       }));
 
@@ -163,6 +166,7 @@ export const useSyncStatus = () => {
         totalErrors: result.totalErrors,
         totalSkipped: result.totalSkipped || 0,
         totalRecovered: result.totalRecovered || 0,
+        details: result.details || [],
         syncHealth: result.health || 'fully_synced',
         isQueued: false
       });
@@ -196,6 +200,7 @@ export const useSyncStatus = () => {
         totalErrors: result.totalErrors,
         totalSkipped: result.totalSkipped || 0,
         totalRecovered: result.totalRecovered || 0,
+        details: result.details || [],
         syncHealth: result.health || 'fully_synced',
         isQueued: false
       });
@@ -260,6 +265,7 @@ export const useSyncStatus = () => {
       totalErrors: syncStats.totalErrors,
       totalSkipped: syncStats.totalSkipped,
       totalRecovered: syncStats.totalRecovered,
+      details: syncStats.details,
       syncHealth: syncStats.syncHealth,
       isQueued: syncStats.isQueued
     });
