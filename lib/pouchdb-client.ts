@@ -287,6 +287,34 @@ export const getDatabaseInfo = async () => {
   return info;
 };
 
+// Clear operational cache databases and recreate them.
+export const clearOperationalDatabases = async () => {
+  try {
+    await initializeDatabases();
+    await productsDB?.destroy();
+    await salesDB?.destroy();
+    await categoriesDB?.destroy();
+    await partyPurchasesDB?.destroy();
+    await syncMetaDB?.destroy();
+    await deletionLogDB?.destroy();
+
+    productsDB = null;
+    salesDB = null;
+    categoriesDB = null;
+    partyPurchasesDB = null;
+    syncMetaDB = null;
+    deletionLogDB = null;
+    isInitialized = false;
+    initializationPromise = null;
+
+    await initializeDatabases();
+    console.log('Operational cache databases cleared and reinitialized');
+  } catch (error) {
+    console.error('Error clearing operational cache databases:', error);
+    throw error;
+  }
+};
+
 // Clear all databases (for testing/reset)
 export const clearAllDatabases = async () => {
   try {

@@ -11,6 +11,7 @@
  */
 
 import { supabase } from '../supabase_client';
+import { clearOperationalDatabases, getSyncMetaDB } from './pouchdb-client';
 import type { 
   Database,
   Product, 
@@ -73,6 +74,87 @@ export interface StockAdjustmentInput {
   date?: string;
   partyPurchase?: PartyPurchase | null;
 }
+
+export interface LocalCacheRepairResult {
+  repairedAt: string;
+  counts: {
+    categories: number;
+    products: number;
+    sales: number;
+    partyPurchases: number;
+  };
+}
+
+const readAllRemoteRows = async <T,>(table: string): Promise<T[]> => {
+  const rows: T[] = [];
+  const pageSize = 1000;
+
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await (supabase.from(table) as any)
+      .select('*')
+      .range(from, from + pageSize - 1);
+
+    if (error) throw error;
+    rows.push(...((data || []) as T[]));
+    if (!data || data.length < pageSize) break;
+  }
+
+  return rows;
+};
+
+const setSyncCheckpoint = async (table: string, time: string): Promise<void> => {
+  const db = await getSyncMetaDB();
+  const docId = `sync_meta_${table}`;
+  await db.put({
+    _id: docId,
+    last_sync_time: time
+  });
+};
+
+export const repairLocalCacheFromSupabase = async (): Promise<LocalCacheRepairResult> => {
+  if (!isOnline) {
+    throw new Error('Local cache repair requires internet connection');
+  }
+
+  const repairedAt = new Date().toISOString();
+
+  const [categories, products, sales, partyPurchases] = await Promise.all([
+    readAllRemoteRows<Category>('categories'),
+    readAllRemoteRows<Product>('products'),
+    readAllRemoteRows<Sale>('sales'),
+    readAllRemoteRows<PartyPurchase>('party_purchases')
+  ]);
+
+  await clearOperationalDatabases();
+
+  await OfflineDB.bulkSaveCategories(categories);
+  await OfflineDB.bulkSaveProducts(products);
+  await OfflineDB.bulkSaveSales(sales);
+  await OfflineDB.bulkSavePartyPurchases(partyPurchases.map(purchase => ({
+    ...purchase,
+    barcode: purchase.barcode ?? null,
+    notes: purchase.notes ?? null,
+    created_at: purchase.created_at || repairedAt,
+    updated_at: purchase.updated_at || purchase.created_at || repairedAt
+  })));
+
+  await Promise.all([
+    setSyncCheckpoint('categories', repairedAt),
+    setSyncCheckpoint('products', repairedAt),
+    setSyncCheckpoint('sales', repairedAt),
+    setSyncCheckpoint('party_purchases', repairedAt)
+  ]);
+
+  return {
+    repairedAt,
+    counts: {
+      categories: categories.length,
+      products: products.length,
+      sales: sales.length,
+      partyPurchases: partyPurchases.length
+    }
+  };
+};
 
 export const getProducts = async (limit?: number): Promise<Product[]> => {
   try {

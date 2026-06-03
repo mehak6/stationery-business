@@ -14,7 +14,15 @@ import {
   getDaysUntilNextBackup,
   BackupData
 } from '../../lib/backup-utils';
-import { createProduct, createSale, createPartyPurchase, getProducts, getSales, getPartyPurchases } from '../../lib/offline-adapter';
+import {
+  createProduct,
+  createSale,
+  createPartyPurchase,
+  getProducts,
+  getSales,
+  getPartyPurchases,
+  repairLocalCacheFromSupabase
+} from '../../lib/offline-adapter';
 import { performManualSync } from '../../lib/sync-manager';
 
 interface BackupRestoreProps {
@@ -29,6 +37,7 @@ export default function BackupRestore({ onClose, showToast }: BackupRestoreProps
   const [daysUntilBackup, setDaysUntilBackup] = useState(0);
   const [restorePreview, setRestorePreview] = useState<BackupData | null>(null);
   const [isRestoring, setIsRestoring] = useState(false);
+  const [isRepairingCache, setIsRepairingCache] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const reloadTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -213,6 +222,32 @@ export default function BackupRestore({ onClose, showToast }: BackupRestoreProps
     showToast(`Backup interval set to ${days} days`, 'info');
   };
 
+  const handleRepairLocalCache = async () => {
+    const confirmed = window.confirm(
+      'Repair local data cache?\n\nThis clears stale offline products, sales, categories, party purchases, sync queue, and sync checkpoints on this device, then downloads clean data from Supabase.\n\nAny unsynced local-only edits on this device will be discarded.'
+    );
+
+    if (!confirmed) return;
+
+    setIsRepairingCache(true);
+    try {
+      const result = await repairLocalCacheFromSupabase();
+      showToast(
+        `Local data refreshed: ${result.counts.products} products, ${result.counts.sales} sales, ${result.counts.partyPurchases} party purchases.`,
+        'success'
+      );
+
+      reloadTimerRef.current = setTimeout(() => {
+        window.location.reload();
+      }, 1200);
+    } catch (error) {
+      console.error('Local cache repair failed:', error);
+      showToast(error instanceof Error ? error.message : 'Failed to repair local data cache', 'error');
+    } finally {
+      setIsRepairingCache(false);
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[9999] overflow-y-auto"
@@ -381,6 +416,26 @@ export default function BackupRestore({ onClose, showToast }: BackupRestoreProps
                 >
                   <Download className="h-4 w-4" />
                   Download 2025-26 Archive
+                </button>
+              </div>
+
+              {/* Local Cache Repair */}
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <RefreshCw className="h-5 w-5 text-red-600" />
+                  <span className="font-medium text-red-900">Repair / Refresh Local Data</span>
+                </div>
+                <p className="text-xs text-red-700 mb-4">
+                  Clears stale offline cache on this device and downloads clean products, sales, party purchases, and categories from Supabase.
+                </p>
+                <button
+                  onClick={handleRepairLocalCache}
+                  disabled={isRepairingCache || loading || isRestoring}
+                  className="w-full py-2 px-4 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2 text-sm font-semibold transition-colors shadow-sm"
+                  type="button"
+                >
+                  <RefreshCw className={`h-4 w-4 ${isRepairingCache ? 'animate-spin' : ''}`} />
+                  {isRepairingCache ? 'Repairing Local Data...' : 'Repair / Refresh Local Data'}
                 </button>
               </div>
 
