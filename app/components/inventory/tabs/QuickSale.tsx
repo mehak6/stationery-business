@@ -45,6 +45,20 @@ interface CartItem {
   saleDate: string;
 }
 
+const parsePriceSearch = (term: string) => {
+  const normalized = term.trim().replace(/[₹,\s]/g, '');
+  if (!/^\d+(\.\d{1,2})?$/.test(normalized)) return null;
+
+  const amount = Number(normalized);
+  return Number.isFinite(amount) ? amount : null;
+};
+
+const pricesMatch = (productPrice: number, searchPrice: number) =>
+  Math.round(Number(productPrice) * 100) === Math.round(searchPrice * 100);
+
+const formatSearchPrice = (amount: number) =>
+  Number.isInteger(amount) ? String(amount) : amount.toFixed(2);
+
 export default function QuickSale({ onNavigate }: QuickSaleProps) {
   const { showToast } = useToast();
   const currentFY = getFinancialYear();
@@ -168,12 +182,27 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
     searchInputRef.current?.focus();
   }, []);
 
-  const filteredProducts = products.filter(product =>
-    product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    product.barcode?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const trimmedSearchTerm = searchTerm.trim();
+  const normalizedSearchTerm = trimmedSearchTerm.toLowerCase();
+  const priceSearchAmount = parsePriceSearch(trimmedSearchTerm);
 
-  const noResults = searchTerm.trim().length > 0 && filteredProducts.length === 0;
+  const priceMatchedProducts = priceSearchAmount === null
+    ? []
+    : products.filter(product => pricesMatch(product.selling_price, priceSearchAmount));
+
+  const filteredProducts = products.filter(product => {
+    if (!normalizedSearchTerm) return true;
+
+    return (
+      product.name.toLowerCase().includes(normalizedSearchTerm) ||
+      product.barcode?.toLowerCase().includes(normalizedSearchTerm) ||
+      (priceSearchAmount !== null && pricesMatch(product.selling_price, priceSearchAmount))
+    );
+  });
+
+  const noResults = trimmedSearchTerm.length > 0 && filteredProducts.length === 0;
+  const shouldShowAddProduct = isCurrentYear && noResults && priceSearchAmount === null;
+  const quickAccessProducts = priceSearchAmount === null ? filteredProducts.slice(0, 10) : filteredProducts;
 
   const handleSaleDateChange = (displayValue: string) => {
     setSaleDateDisplay(displayValue);
@@ -400,7 +429,7 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
               <input
                 ref={searchInputRef}
                 type="text"
-                placeholder={isCurrentYear ? "Search products or scan barcode..." : "View-only mode for historical records"}
+                placeholder={isCurrentYear ? "Search products, amount, or scan barcode..." : "View-only mode for historical records"}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="input-field pl-10 w-full text-gray-900"
@@ -414,8 +443,19 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
           <h3 className="text-sm font-semibold text-gray-700 mb-3">
             {isCurrentYear ? 'Quick Access' : `Historical Stock (${financialYear})`}
           </h3>
+          {isCurrentYear && priceSearchAmount !== null && trimmedSearchTerm.length > 0 && (
+            <div className={`mb-3 rounded-lg border px-3 py-2 text-sm font-medium ${
+              priceMatchedProducts.length > 0
+                ? 'border-primary-200 bg-primary-50 text-primary-800'
+                : 'border-yellow-200 bg-yellow-50 text-yellow-800'
+            }`}>
+              {priceMatchedProducts.length > 0
+                ? `${priceMatchedProducts.length} product${priceMatchedProducts.length === 1 ? '' : 's'} at ₹${formatSearchPrice(priceSearchAmount)}`
+                : `No products found at ₹${formatSearchPrice(priceSearchAmount)}`}
+            </div>
+          )}
           <div className="flex gap-3 overflow-x-auto pb-3">
-            {filteredProducts.slice(0, 10).map(product => {
+            {quickAccessProducts.map(product => {
               const displayStock = getDisplayStock(product);
               return (
                 <div
@@ -445,7 +485,7 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
             })}
           </div>
 
-          {isCurrentYear && noResults && (
+          {shouldShowAddProduct && (
             <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
               <button
                 onClick={() => handleAddNewProduct(searchTerm)}
