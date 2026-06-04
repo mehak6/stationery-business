@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Activity, Filter, RefreshCw, Search, ShieldCheck } from 'lucide-react';
+import { Activity, Filter, RefreshCw, RotateCcw, Search, ShieldCheck, X } from 'lucide-react';
 import {
+  adjustProductStock,
   getInventoryTransactions,
   getProducts,
   type InventoryTransaction
@@ -73,6 +74,9 @@ export default function InventoryLedger({ onNavigate }: InventoryLedgerProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedProductId, setSelectedProductId] = useState('');
   const [selectedAction, setSelectedAction] = useState('');
+  const [reverseEntry, setReverseEntry] = useState<InventoryTransaction | null>(null);
+  const [reverseReason, setReverseReason] = useState('');
+  const [isReversing, setIsReversing] = useState(false);
 
   const loadLedger = useCallback(async () => {
     try {
@@ -121,6 +125,53 @@ export default function InventoryLedger({ onNavigate }: InventoryLedgerProps) {
       { total: 0, increased: 0, reduced: 0 }
     );
   }, [filteredEntries]);
+
+  const handleOpenReverse = (entry: InventoryTransaction) => {
+    setReverseEntry(entry);
+    setReverseReason(`Reverse mistaken damaged stock entry from ${formatDateTime(entry.created_at)}`);
+  };
+
+  const handleReverseDamaged = async () => {
+    if (!reverseEntry) return;
+
+    const product = products.find(item => item.id === reverseEntry.product_id);
+    if (!product) {
+      showToast('Product not found for this ledger row', 'error');
+      return;
+    }
+
+    if (!reverseReason.trim()) {
+      showToast('Reason is required to reverse damaged stock', 'warning');
+      return;
+    }
+
+    const restoreQuantity = Math.abs(Number(reverseEntry.quantity_change || 0));
+    if (restoreQuantity <= 0) {
+      showToast('This damaged-stock row has no quantity to reverse', 'error');
+      return;
+    }
+
+    setIsReversing(true);
+    try {
+      await adjustProductStock({
+        product,
+        mode: 'add',
+        quantity: restoreQuantity,
+        reason: reverseReason.trim(),
+        date: new Date().toISOString().split('T')[0]
+      });
+
+      showToast(`Restored ${restoreQuantity} unit${restoreQuantity === 1 ? '' : 's'} to ${product.name}`, 'success');
+      setReverseEntry(null);
+      setReverseReason('');
+      await loadLedger();
+    } catch (error) {
+      console.error('Error reversing damaged stock:', error);
+      showToast(error instanceof Error ? error.message : 'Unable to reverse damaged stock', 'error');
+    } finally {
+      setIsReversing(false);
+    }
+  };
 
   return (
     <div className="p-6 bg-primary-50 min-h-screen pb-24">
@@ -221,6 +272,7 @@ export default function InventoryLedger({ onNavigate }: InventoryLedgerProps) {
                   <th className="px-4 py-3 text-right text-xs font-black uppercase text-gray-500">After</th>
                   <th className="px-4 py-3 text-left text-xs font-black uppercase text-gray-500">Who / Source</th>
                   <th className="px-4 py-3 text-left text-xs font-black uppercase text-gray-500">Why</th>
+                  <th className="px-4 py-3 text-right text-xs font-black uppercase text-gray-500">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -249,6 +301,21 @@ export default function InventoryLedger({ onNavigate }: InventoryLedgerProps) {
                     <td className="px-4 py-3 text-sm text-gray-700 max-w-xs">
                       <p className="line-clamp-2">{entry.reason || 'No reason recorded'}</p>
                     </td>
+                    <td className="px-4 py-3 text-right">
+                      {entry.action === 'damaged_stock_removed' && entry.product_id && entry.quantity_change < 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenReverse(entry)}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-green-200 bg-green-50 px-3 py-1.5 text-xs font-black text-green-700 hover:bg-green-100"
+                          title="Reverse damaged stock"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          Reverse
+                        </button>
+                      ) : (
+                        <span className="text-xs text-gray-300">-</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -256,6 +323,72 @@ export default function InventoryLedger({ onNavigate }: InventoryLedgerProps) {
           </div>
         )}
       </div>
+
+      {reverseEntry && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[9999] backdrop-blur-sm">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <h3 className="text-xl font-black text-gray-900">Reverse Damaged Stock</h3>
+                <p className="text-sm font-bold text-primary-600 uppercase tracking-widest mt-1">{getProductName(reverseEntry)}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReverseEntry(null)}
+                disabled={isReversing}
+                className="text-gray-400 hover:text-gray-600"
+                aria-label="Close reverse damaged stock dialog"
+              >
+                <X className="h-6 w-6" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3 mb-5">
+              <div className="bg-red-50 rounded-xl p-3 border border-red-100">
+                <p className="text-[10px] uppercase font-black text-red-500">Damaged</p>
+                <p className="text-2xl font-black text-red-700">{Math.abs(reverseEntry.quantity_change)}</p>
+              </div>
+              <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                <p className="text-[10px] uppercase font-black text-gray-400">Before</p>
+                <p className="text-2xl font-black text-gray-900">{reverseEntry.stock_before}</p>
+              </div>
+              <div className="bg-green-50 rounded-xl p-3 border border-green-100">
+                <p className="text-[10px] uppercase font-black text-green-500">Restore</p>
+                <p className="text-2xl font-black text-green-700">+{Math.abs(reverseEntry.quantity_change)}</p>
+              </div>
+            </div>
+
+            <div className="mb-5">
+              <label className="block text-[10px] uppercase font-black text-gray-400 mb-1 ml-1">Reason Required</label>
+              <textarea
+                value={reverseReason}
+                onChange={(event) => setReverseReason(event.target.value)}
+                className="w-full min-h-[96px] bg-gray-50 border-2 border-gray-100 rounded-xl p-3 font-bold text-sm text-gray-900 focus:outline-none focus:border-primary-500"
+                placeholder="Example: reversing damaged entry entered by mistake"
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setReverseEntry(null)}
+                disabled={isReversing}
+                className="flex-1 py-3 px-4 rounded-xl font-bold text-gray-500 hover:bg-gray-50 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleReverseDamaged}
+                disabled={isReversing}
+                className="flex-1 py-3 px-4 rounded-xl text-white font-black shadow-lg transition-all disabled:opacity-50 bg-green-600 hover:bg-green-700"
+              >
+                {isReversing ? 'Reversing...' : 'Reverse Now'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
