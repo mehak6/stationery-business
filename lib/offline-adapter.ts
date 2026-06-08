@@ -31,14 +31,18 @@ import {
 } from './date-utils';
 
 // Network status
-let isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+const isTestRuntime = typeof process !== 'undefined' && process.env.NODE_ENV === 'test';
+const canUseFetch = () => typeof fetch !== 'undefined' || isTestRuntime;
+let isOnline = typeof navigator !== 'undefined'
+  ? navigator.onLine && canUseFetch()
+  : canUseFetch();
 let onlineStatusListeners: Set<(online: boolean) => void> = new Set();
 
 // Initialize network detection
 if (typeof window !== 'undefined') {
   window.addEventListener('online', () => {
-    isOnline = true;
-    onlineStatusListeners.forEach(listener => listener(true));
+    isOnline = canUseFetch();
+    onlineStatusListeners.forEach(listener => listener(isOnline));
   });
 
   window.addEventListener('offline', () => {
@@ -73,6 +77,18 @@ export interface StockAdjustmentInput {
   reason: string;
   date?: string;
   partyPurchase?: PartyPurchase | null;
+}
+
+export interface PartyPurchasePerformance {
+  partyPurchaseId: string;
+  transferredQuantity: number;
+  deductedQuantity: number;
+  soldQuantity: number;
+  soldAmount: number;
+  soldProfit: number;
+  deductedCost: number;
+  remainingBatchQuantity: number;
+  completedAt: string | null;
 }
 
 export interface LocalCacheRepairResult {
@@ -1200,6 +1216,23 @@ export const getCategories = async (): Promise<Category[]> => {
 // ==================== PARTY PURCHASES ====================
 
 export const getPartyPurchaseById = async (id: string): Promise<PartyPurchase | null> => {
+  if (isOnline) {
+    try {
+      const { data, error } = await (supabase.from('party_purchases') as any)
+        .select('*')
+        .eq('id', id)
+        .single();
+
+      if (error) throw error;
+      if (data) {
+        await OfflineDB.savePartyPurchase(data);
+        return data;
+      }
+    } catch (error) {
+      console.warn('Could not fetch party purchase from Supabase:', error);
+    }
+  }
+
   return await OfflineDB.getPartyPurchaseById(id);
 };
 
@@ -1228,6 +1261,157 @@ export const getPartyPurchases = async (): Promise<PartyPurchase[]> => {
     console.error('Error fetching party purchases, using offline cache:', error);
     return await OfflineDB.getAllPartyPurchases();
   }
+};
+
+const createEmptyPartyPerformance = (partyPurchaseId: string): PartyPurchasePerformance => ({
+  partyPurchaseId,
+  transferredQuantity: 0,
+  deductedQuantity: 0,
+  soldQuantity: 0,
+  soldAmount: 0,
+  soldProfit: 0,
+  deductedCost: 0,
+  remainingBatchQuantity: 0,
+  completedAt: null
+});
+
+const updateCompletedAt = (current: string | null, candidate?: string | null) => {
+  if (!candidate) return current;
+  if (!current) return candidate;
+  return new Date(candidate).getTime() > new Date(current).getTime() ? candidate : current;
+};
+
+export const getPartyPurchasePerformance = async (
+  partyPurchaseIds: string[]
+): Promise<Record<string, PartyPurchasePerformance>> => {
+  const uniqueIds = Array.from(new Set(partyPurchaseIds.filter(Boolean)));
+  const performance = uniqueIds.reduce<Record<string, PartyPurchasePerformance>>((acc, id) => {
+    acc[id] = createEmptyPartyPerformance(id);
+    return acc;
+  }, {});
+
+  if (!isOnline || uniqueIds.length === 0) {
+    return performance;
+  }
+
+  try {
+    const [movementResult, batchResult, allocationResult] = await Promise.all([
+      (supabase.from('party_purchase_movements') as any)
+        .select('party_purchase_id, action, quantity, unit_cost, movement_date, created_at')
+        .in('party_purchase_id', uniqueIds),
+      (supabase.from('product_stock_batches') as any)
+        .select('party_purchase_id, quantity_received, quantity_remaining, created_at')
+        .in('party_purchase_id', uniqueIds),
+      (supabase.from('sale_batch_allocations') as any)
+        .select('party_purchase_id, quantity, unit_price, profit, created_at')
+        .in('party_purchase_id', uniqueIds)
+        .not('party_purchase_id', 'is', null)
+    ]);
+
+    const possibleErrors = [movementResult.error, batchResult.error, allocationResult.error].filter(Boolean);
+    const missingFeature = possibleErrors.find(error =>
+      isMissingRemoteFeatureError(error, 'party_purchase_movements') ||
+      isMissingRemoteFeatureError(error, 'product_stock_batches') ||
+      isMissingRemoteFeatureError(error, 'sale_batch_allocations')
+    );
+
+    if (missingFeature) {
+      return performance;
+    }
+
+    if (possibleErrors.length > 0) {
+      throw possibleErrors[0];
+    }
+
+    (movementResult.data || []).forEach((movement: any) => {
+      const row = performance[movement.party_purchase_id];
+      if (!row) return;
+
+      const quantity = Number(movement.quantity || 0);
+      const unitCost = Number(movement.unit_cost || 0);
+
+      if (movement.action === 'deducted' || movement.action === 'gifted') {
+        row.deductedQuantity += quantity;
+        row.deductedCost += quantity * unitCost;
+      }
+
+      row.completedAt = updateCompletedAt(row.completedAt, movement.created_at || movement.movement_date);
+    });
+
+    (batchResult.data || []).forEach((batch: any) => {
+      const row = performance[batch.party_purchase_id];
+      if (!row) return;
+
+      row.transferredQuantity += Number(batch.quantity_received || 0);
+      row.remainingBatchQuantity += Number(batch.quantity_remaining || 0);
+      row.completedAt = updateCompletedAt(row.completedAt, batch.created_at);
+    });
+
+    (allocationResult.data || []).forEach((allocation: any) => {
+      const row = performance[allocation.party_purchase_id];
+      if (!row) return;
+
+      const quantity = Number(allocation.quantity || 0);
+      const unitPrice = Number(allocation.unit_price || 0);
+
+      row.soldQuantity += quantity;
+      row.soldAmount += quantity * unitPrice;
+      row.soldProfit += Number(allocation.profit || 0);
+      row.completedAt = updateCompletedAt(row.completedAt, allocation.created_at);
+    });
+
+    return performance;
+  } catch (error) {
+    console.warn('Could not load party purchase performance:', error);
+    return performance;
+  }
+};
+
+export const recordPartyPurchaseDeduction = async (input: {
+  purchase: PartyPurchase;
+  quantity: number;
+  date: string;
+  reason: string;
+  action?: 'deducted' | 'gifted';
+}): Promise<PartyPurchase> => {
+  const reason = input.reason.trim();
+  if (!reason) {
+    throw new Error('Reason is required');
+  }
+
+  if (!isOnline) {
+    throw new Error('Party stock deduction requires internet so the movement can be recorded');
+  }
+
+  const rpcResult = await (supabase.rpc as any)('record_party_purchase_deduction', {
+    p_party_purchase_id: input.purchase.id,
+    p_quantity: Math.floor(input.quantity),
+    p_movement_date: input.date,
+    p_reason: reason,
+    p_action: input.action || 'deducted',
+    p_metadata: {
+      party_name: input.purchase.party_name,
+      item_name: input.purchase.item_name
+    }
+  });
+
+  if (!rpcResult.error) {
+    if (rpcResult.data?.success === false) {
+      throw new Error(rpcResult.data.error || 'Party stock deduction failed');
+    }
+
+    const updated = await getPartyPurchaseById(input.purchase.id);
+    if (!updated) throw new Error('Updated party purchase could not be loaded');
+    return updated;
+  }
+
+  if (isMissingRemoteFeatureError(rpcResult.error, 'record_party_purchase_deduction')) {
+    return updatePartyPurchase(input.purchase.id, {
+      remaining_quantity: input.purchase.remaining_quantity - Math.floor(input.quantity)
+    });
+  }
+
+  throw rpcResult.error;
 };
 
 export const createPartyPurchase = async (purchase: PartyPurchaseInsert): Promise<PartyPurchase> => {

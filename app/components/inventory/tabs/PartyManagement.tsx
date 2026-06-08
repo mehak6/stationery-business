@@ -17,7 +17,10 @@ import {
   getPartyPurchases,
   deletePartyPurchase,
   updatePartyPurchase,
-  getProducts
+  getProducts,
+  getPartyPurchasePerformance,
+  recordPartyPurchaseDeduction,
+  type PartyPurchasePerformance
 } from 'lib/offline-adapter';
 import { addProductHistory } from 'lib/product-history';
 import { formatDateToDisplay, parseDisplayDate } from 'lib/date-utils';
@@ -37,6 +40,7 @@ interface PartyManagementProps {
 export default function PartyManagement({ onNavigate }: PartyManagementProps) {
   const { showToast } = useToast();
   const [partyPurchases, setPartyPurchases] = useState<PartyPurchase[]>([]);
+  const [performanceByPurchase, setPerformanceByPurchase] = useState<Record<string, PartyPurchasePerformance>>({});
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
@@ -50,12 +54,25 @@ export default function PartyManagement({ onNavigate }: PartyManagementProps) {
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
 
+  const refreshPerformance = async (purchases: PartyPurchase[]) => {
+    const performance = await getPartyPurchasePerformance(purchases.map(p => p.id));
+    setPerformanceByPurchase(performance);
+  };
+
+  const replacePurchase = async (updatedPurchase: PartyPurchase) => {
+    const nextPurchases = partyPurchases.map(p => p.id === updatedPurchase.id ? updatedPurchase : p);
+    setPartyPurchases(nextPurchases);
+    await refreshPerformance(nextPurchases);
+  };
+
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
         const data = await getPartyPurchases();
-        setPartyPurchases(data || []);
+        const purchases = data || [];
+        setPartyPurchases(purchases);
+        await refreshPerformance(purchases);
       } catch (error) {
         console.error('Error:', error);
       } finally {
@@ -70,12 +87,43 @@ export default function PartyManagement({ onNavigate }: PartyManagementProps) {
     p.party_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     p.barcode?.toLowerCase().includes(searchTerm.toLowerCase())
   );
+  const activePurchases = filteredPurchases.filter(p => p.remaining_quantity > 0);
+  const completedPurchases = filteredPurchases.filter(p => p.remaining_quantity <= 0);
+  const activeStockValue = partyPurchases
+    .filter(p => p.remaining_quantity > 0)
+    .reduce((sum, p) => sum + p.purchase_price * p.remaining_quantity, 0);
+  const completedPurchaseCost = partyPurchases
+    .filter(p => p.remaining_quantity <= 0)
+    .reduce((sum, p) => sum + p.purchase_price * p.purchased_quantity, 0);
+  const completedProfitLoss = partyPurchases
+    .filter(p => p.remaining_quantity <= 0)
+    .reduce((sum, p) => {
+      const performance = performanceByPurchase[p.id];
+      return sum + ((performance?.soldProfit || 0) - (performance?.deductedCost || 0));
+    }, 0);
+
+  const getPerformance = (purchase: PartyPurchase) =>
+    performanceByPurchase[purchase.id] || {
+      partyPurchaseId: purchase.id,
+      transferredQuantity: 0,
+      deductedQuantity: 0,
+      soldQuantity: 0,
+      soldAmount: 0,
+      soldProfit: 0,
+      deductedCost: 0,
+      remainingBatchQuantity: 0,
+      completedAt: null
+    };
+
+  const formatCurrency = (value: number) => `₹${value.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 
   const handleDeletePurchase = async (id: string) => {
     if (!confirm('Are you sure?')) return;
     try {
       await deletePartyPurchase(id);
-      setPartyPurchases(prev => prev.filter(p => p.id !== id));
+      const nextPurchases = partyPurchases.filter(p => p.id !== id);
+      setPartyPurchases(nextPurchases);
+      await refreshPerformance(nextPurchases);
       showToast('Purchase deleted', 'success');
     } catch (error) {
       showToast('Error deleting purchase', 'error');
@@ -119,7 +167,9 @@ export default function PartyManagement({ onNavigate }: PartyManagementProps) {
       }
 
       await updatePartyPurchase(id, updates);
-      setPartyPurchases(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+      const nextPurchases = partyPurchases.map(p => p.id === id ? { ...p, ...updates } : p);
+      setPartyPurchases(nextPurchases);
+      await refreshPerformance(nextPurchases);
       setEditingPurchase(null);
       setEditingField(null);
       showToast('Updated successfully', 'success');
@@ -148,11 +198,40 @@ export default function PartyManagement({ onNavigate }: PartyManagementProps) {
         </div>
       </div>
 
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        <div className="card">
+          <p className="text-xs font-bold text-gray-500 uppercase">Active Stock Value</p>
+          <p className="text-2xl font-black text-gray-900 mt-1">{formatCurrency(activeStockValue)}</p>
+          <p className="text-xs text-gray-500 mt-1">{partyPurchases.filter(p => p.remaining_quantity > 0).length} active purchases</p>
+        </div>
+        <div className="card">
+          <p className="text-xs font-bold text-gray-500 uppercase">Completed Purchase Cost</p>
+          <p className="text-2xl font-black text-gray-900 mt-1">{formatCurrency(completedPurchaseCost)}</p>
+          <p className="text-xs text-gray-500 mt-1">{partyPurchases.filter(p => p.remaining_quantity <= 0).length} completed purchases</p>
+        </div>
+        <div className="card">
+          <p className="text-xs font-bold text-gray-500 uppercase">Completed Realized P/L</p>
+          <p className={`text-2xl font-black mt-1 ${completedProfitLoss >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            {formatCurrency(completedProfitLoss)}
+          </p>
+          <p className="text-xs text-gray-500 mt-1">Sales profit minus gifted/deducted cost</p>
+        </div>
+      </div>
+
       {loading ? (
         <p className="text-center py-8">Loading...</p>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-          {filteredPurchases.map(purchase => (
+        <div className="space-y-8">
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-black text-gray-900">Active Purchases</h2>
+              <span className="text-xs font-bold text-gray-500">{activePurchases.length} rows</span>
+            </div>
+            {activePurchases.length === 0 ? (
+              <div className="card text-center py-8 text-gray-500 font-bold">No active party stock found.</div>
+            ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+          {activePurchases.map(purchase => (
             <div key={purchase.id} className="card hover:shadow-md transition-shadow">
               <div className="flex justify-between mb-2">
                 {editingPurchase === purchase.id && editingField === 'party_name' ? (
@@ -356,16 +435,95 @@ export default function PartyManagement({ onNavigate }: PartyManagementProps) {
               </div>
             </div>
           ))}
+            </div>
+            )}
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-black text-gray-900">Completed Purchases</h2>
+              <span className="text-xs font-bold text-gray-500">{completedPurchases.length} rows</span>
+            </div>
+            {completedPurchases.length === 0 ? (
+              <div className="card text-center py-8 text-gray-500 font-bold">No completed party purchases yet.</div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+                {completedPurchases.map(purchase => {
+                  const performance = getPerformance(purchase);
+                  const purchaseCost = purchase.purchase_price * purchase.purchased_quantity;
+                  const realizedProfitLoss = performance.soldProfit - performance.deductedCost;
+                  const completedDate = performance.completedAt || purchase.updated_at || purchase.purchase_date;
+
+                  return (
+                    <div key={purchase.id} className="card border-l-4 border-l-green-500">
+                      <div className="flex justify-between gap-3 mb-4">
+                        <div>
+                          <span className="badge-success">{purchase.party_name}</span>
+                          <h3 className="font-black text-gray-900 uppercase mt-2">{purchase.item_name}</h3>
+                          <p className="text-xs text-gray-500 mt-1">Completed: {formatDateToDisplay(completedDate.split('T')[0])}</p>
+                        </div>
+                        <button onClick={() => handleDeletePurchase(purchase.id)} className="p-1 text-gray-400 hover:text-red-600 h-8" title="Delete purchase"><Trash2 className="h-4 w-4" /></button>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+                        <div className="bg-gray-50 rounded-xl p-3">
+                          <p className="text-[10px] font-black text-gray-400 uppercase">Purchased</p>
+                          <p className="font-black text-gray-900">{purchase.purchased_quantity} units</p>
+                        </div>
+                        <div className="bg-gray-50 rounded-xl p-3">
+                          <p className="text-[10px] font-black text-gray-400 uppercase">Transferred</p>
+                          <p className="font-black text-primary-700">{performance.transferredQuantity} units</p>
+                        </div>
+                        <div className="bg-gray-50 rounded-xl p-3">
+                          <p className="text-[10px] font-black text-gray-400 uppercase">Deducted/Gifted</p>
+                          <p className="font-black text-orange-700">{performance.deductedQuantity} units</p>
+                        </div>
+                        <div className="bg-gray-50 rounded-xl p-3">
+                          <p className="text-[10px] font-black text-gray-400 uppercase">Sold From Batch</p>
+                          <p className="font-black text-green-700">{performance.soldQuantity} units</p>
+                        </div>
+                        <div className="bg-gray-50 rounded-xl p-3">
+                          <p className="text-[10px] font-black text-gray-400 uppercase">In Shop Stock</p>
+                          <p className="font-black text-gray-900">{performance.remainingBatchQuantity} units</p>
+                        </div>
+                        <div className="bg-gray-50 rounded-xl p-3">
+                          <p className="text-[10px] font-black text-gray-400 uppercase">Remaining Party</p>
+                          <p className="font-black text-gray-900">{purchase.remaining_quantity} units</p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 pt-4 border-t border-gray-100">
+                        <div>
+                          <p className="text-[10px] font-black text-gray-400 uppercase">Purchase Cost</p>
+                          <p className="font-black text-gray-900">{formatCurrency(purchaseCost)}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-black text-gray-400 uppercase">Sold Amount</p>
+                          <p className="font-black text-blue-700">{formatCurrency(performance.soldAmount)}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-black text-gray-400 uppercase">Realized P/L</p>
+                          <p className={`font-black ${realizedProfitLoss >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                            {formatCurrency(realizedProfitLoss)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      {showAddForm && <AddPurchaseModal onClose={() => setShowAddForm(false)} onPurchaseAdded={(p) => { setPartyPurchases([p, ...partyPurchases]); setShowAddForm(false); }} />}
-      {showFileUpload && <FileUploadModal onClose={() => setShowFileUpload(false)} onFileProcessed={(ps) => { setPartyPurchases([...ps, ...partyPurchases]); }} />}
+      {showAddForm && <AddPurchaseModal onClose={() => setShowAddForm(false)} onPurchaseAdded={async (p) => { const next = [p, ...partyPurchases]; setPartyPurchases(next); await refreshPerformance(next); setShowAddForm(false); }} />}
+      {showFileUpload && <FileUploadModal onClose={() => setShowFileUpload(false)} onFileProcessed={async (ps) => { const next = [...ps, ...partyPurchases]; setPartyPurchases(next); await refreshPerformance(next); }} />}
       {showTransferModal && selectedPurchase && (
         <TransferModal
           purchase={selectedPurchase}
           onClose={() => { setShowTransferModal(false); setSelectedPurchase(null); }}
-          onTransferComplete={(p) => { setPartyPurchases(prev => prev.map(old => old.id === p.id ? p : old)); setShowTransferModal(false); }}
+          onTransferComplete={async (p) => { await replacePurchase(p); setShowTransferModal(false); setSelectedPurchase(null); }}
           showToast={showToast}
         />
       )}
@@ -373,8 +531,8 @@ export default function PartyManagement({ onNavigate }: PartyManagementProps) {
         <DeductPartyStockModal
           purchase={selectedPurchase}
           onClose={() => { setShowDeductModal(false); setSelectedPurchase(null); }}
-          onDeductionComplete={(p) => { 
-            setPartyPurchases(prev => prev.map(old => old.id === p.id ? p : old)); 
+          onDeductionComplete={async (p) => {
+            await replacePurchase(p);
             setShowDeductModal(false); 
             setSelectedPurchase(null);
           }}
@@ -394,6 +552,10 @@ function DeductPartyStockModal({ purchase, onClose, onDeductionComplete }: { pur
 
   const handleDeduct = async () => {
     if (quantity > purchase.remaining_quantity || quantity <= 0) return;
+    if (!notes.trim()) {
+      showToast('Reason is required for party stock deduction', 'error');
+      return;
+    }
     setLoading(true);
     try {
       // 1. Find linked product to record history
@@ -413,16 +575,19 @@ function DeductPartyStockModal({ purchase, onClose, onDeductionComplete }: { pur
         });
       }
 
-      // 2. Reduce remaining quantity in party purchase
-      const updated = await updatePartyPurchase(purchase.id, {
-        remaining_quantity: purchase.remaining_quantity - quantity
+      const updated = await recordPartyPurchaseDeduction({
+        purchase,
+        quantity,
+        date,
+        reason: notes,
+        action: 'deducted'
       });
 
       showToast(`Deducted ${quantity} units from ${purchase.party_name} stock`, 'success');
       onDeductionComplete(updated);
     } catch (error) {
       console.error('Error deducting stock:', error);
-      showToast('Error deducting stock', 'error');
+      showToast(error instanceof Error ? error.message : 'Error deducting stock', 'error');
     } finally {
       setLoading(false);
     }
@@ -473,7 +638,7 @@ function DeductPartyStockModal({ purchase, onClose, onDeductionComplete }: { pur
 
         <div className="flex gap-3 mt-8">
           <button onClick={onClose} className="flex-1 py-3 px-4 rounded-xl font-bold text-gray-500 hover:bg-gray-50 transition-colors">Cancel</button>
-          <button onClick={handleDeduct} disabled={loading} className="flex-1 py-3 px-4 rounded-xl bg-orange-600 text-white font-black hover:bg-orange-700 disabled:opacity-50 shadow-lg shadow-orange-100 transition-all transform active:scale-95">{loading ? 'Processing...' : 'Deduct Now'}</button>
+          <button onClick={handleDeduct} disabled={loading || !notes.trim()} className="flex-1 py-3 px-4 rounded-xl bg-orange-600 text-white font-black hover:bg-orange-700 disabled:opacity-50 shadow-lg shadow-orange-100 transition-all transform active:scale-95">{loading ? 'Processing...' : 'Deduct Now'}</button>
         </div>
       </div>
     </div>

@@ -2,8 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { X, Calendar } from 'lucide-react';
-import { getProducts, updateProduct, createProduct, updatePartyPurchase } from 'lib/offline-adapter';
-import { addProductHistory } from 'lib/product-history';
+import { adjustProductStock, createProduct, getPartyPurchaseById, getProducts } from 'lib/offline-adapter';
 import { formatDateToDisplay, parseDisplayDate } from 'lib/date-utils';
 import type { PartyPurchase, Product } from 'supabase_client';
 
@@ -43,58 +42,42 @@ export default function TransferModal({ purchase, onClose, onTransferComplete, s
 
     setLoading(true);
     try {
-      let productId: string;
-      let productName: string;
-      let stockBefore: number;
-      let stockAfter: number;
+      let targetProduct: Product;
 
       if (existingProduct) {
-        productId = existingProduct.id;
-        productName = existingProduct.name;
-        stockBefore = existingProduct.stock_quantity;
-        stockAfter = stockBefore + transferQuantity;
-
-        await updateProduct(existingProduct.id, { stock_quantity: stockAfter });
-        showToast(`Added ${transferQuantity} units to "${existingProduct.name}"`, 'success');
+        targetProduct = existingProduct;
       } else {
-        const newProduct = await createProduct({
+        targetProduct = await createProduct({
           name: purchase.item_name,
           barcode: purchase.barcode || null,
           purchase_price: purchase.purchase_price,
           selling_price: purchase.selling_price,
-          stock_quantity: transferQuantity,
+          stock_quantity: 0,
           min_stock_level: 5,
           description: `Transferred from ${purchase.party_name} purchase`,
           category_id: null
         });
-        
-        productId = newProduct.id;
-        productName = newProduct.name;
-        stockBefore = 0;
-        stockAfter = transferQuantity;
-        
         showToast(`Created new product "${purchase.item_name}"`, 'success');
       }
 
-      // Record History
-      await addProductHistory({
-        product_id: productId,
-        product_name: productName,
-        action: 'stock_added',
-        quantity_change: transferQuantity,
-        stock_before: stockBefore,
-        stock_after: stockAfter,
+      await adjustProductStock({
+        product: targetProduct,
+        mode: 'party_transfer',
+        quantity: transferQuantity,
+        reason: `Transferred ${transferQuantity} units from ${purchase.party_name}`,
         date: transferDate,
-        notes: `Transferred ${transferQuantity} units from ${purchase.party_name}`
+        partyPurchase: purchase
       });
 
-      const updatedPurchase = await updatePartyPurchase(purchase.id, {
+      const updatedPurchase = await getPartyPurchaseById(purchase.id) || {
+        ...purchase,
         remaining_quantity: purchase.remaining_quantity - transferQuantity
-      });
+      };
+      showToast(`Transferred ${transferQuantity} units to "${targetProduct.name}"`, 'success');
       onTransferComplete(updatedPurchase);
     } catch (error) {
       console.error('Error transferring:', error);
-      showToast('Error transferring to products', 'error');
+      showToast(error instanceof Error ? error.message : 'Error transferring to products', 'error');
     } finally {
       setLoading(false);
     }

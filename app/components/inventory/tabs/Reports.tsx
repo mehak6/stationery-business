@@ -6,7 +6,9 @@ import {
   getSales,
   getPartyPurchases,
   getSalesByDateRange,
-  getClosingStockForYear
+  getClosingStockForYear,
+  getPartyPurchasePerformance,
+  type PartyPurchasePerformance
 } from 'lib/offline-adapter';
 import { 
   getFinancialYear, 
@@ -36,6 +38,7 @@ export default function Reports({ onNavigate }: ReportsProps) {
   const [products, setProducts] = useState<Product[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
   const [partyPurchases, setPartyPurchases] = useState<PartyPurchase[]>([]);
+  const [partyPerformance, setPartyPerformance] = useState<Record<string, PartyPurchasePerformance>>({});
   const [financialYear, setFinancialYear] = useState(getFinancialYear());
   const [historicalStock, setHistoricalStock] = useState<Record<string, number>>({});
   const [startDate, setStartDate] = useState('');
@@ -78,6 +81,7 @@ export default function Reports({ onNavigate }: ReportsProps) {
       setProducts(productsData || []);
       setSales(salesData || []);
       setPartyPurchases(partyData || []);
+      setPartyPerformance(await getPartyPurchasePerformance((partyData || []).map(p => p.id)));
       setHistoricalStock(closingData || {});
     } catch (error) {
       console.error('Error fetching reports data:', error);
@@ -91,12 +95,15 @@ export default function Reports({ onNavigate }: ReportsProps) {
       try {
         setLoading(true);
         setIsCustomRange(true);
-        const [filteredSales, productsData] = await Promise.all([
+        const [filteredSales, productsData, partyData] = await Promise.all([
           getSalesByDateRange(startDate, endDate),
-          getProducts()
+          getProducts(),
+          getPartyPurchases()
         ]);
         setSales(filteredSales || []);
         setProducts(productsData || []);
+        setPartyPurchases(partyData || []);
+        setPartyPerformance(await getPartyPurchasePerformance((partyData || []).map(p => p.id)));
         setFilterApplied(true);
         setStartDateDisplay(formatDateToDDMMYYYY(startDate));
         setEndDateDisplay(formatDateToDDMMYYYY(endDate));
@@ -147,6 +154,16 @@ export default function Reports({ onNavigate }: ReportsProps) {
         quantity_sold: p.salesData.quantity,
         revenue: p.salesData.revenue,
         profit: p.salesData.profit
+      })),
+      completed_party_purchases: completedPartyPurchases.map(row => ({
+        party_name: row.purchase.party_name,
+        item_name: row.purchase.item_name,
+        purchase_cost: row.purchaseCost,
+        transferred_quantity: row.transferredQuantity,
+        sold_quantity: row.soldQuantity,
+        deducted_quantity: row.deductedQuantity,
+        sold_amount: row.soldAmount,
+        realized_profit_loss: row.realizedProfitLoss
       })),
       period_covered: {
         start: startDateDisplay,
@@ -208,6 +225,29 @@ export default function Reports({ onNavigate }: ReportsProps) {
   const partyInvestments = Object.entries(partyInvestmentMap)
     .map(([name, investment]) => ({ name, investment }))
     .sort((a, b) => b.investment - a.investment);
+
+  const completedPartyPurchases = partyPurchases
+    .filter(purchase => purchase.remaining_quantity <= 0)
+    .map(purchase => {
+      const performance = partyPerformance[purchase.id];
+      const purchaseCost = purchase.purchase_price * purchase.purchased_quantity;
+      const soldAmount = performance?.soldAmount || 0;
+      const deductedCost = performance?.deductedCost || 0;
+      const realizedProfitLoss = (performance?.soldProfit || 0) - deductedCost;
+
+      return {
+        purchase,
+        purchaseCost,
+        soldAmount,
+        deductedQuantity: performance?.deductedQuantity || 0,
+        soldQuantity: performance?.soldQuantity || 0,
+        transferredQuantity: performance?.transferredQuantity || 0,
+        realizedProfitLoss
+      };
+    })
+    .sort((a, b) => Math.abs(b.realizedProfitLoss) - Math.abs(a.realizedProfitLoss));
+
+  const completedPartyProfitLoss = completedPartyPurchases.reduce((sum, row) => sum + row.realizedProfitLoss, 0);
 
   if (loading) return (
     <div className="p-12 flex flex-col items-center justify-center min-h-[60vh]">
@@ -394,6 +434,12 @@ export default function Reports({ onNavigate }: ReportsProps) {
                 <span className="font-black">₹{totalCostOfGoodsSold.toLocaleString()}</span>
               </div>
               <div className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl border border-gray-100">
+                <span className="text-gray-500 font-bold text-sm">Completed Party Realized P/L:</span>
+                <span className={`font-black ${completedPartyProfitLoss >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                  â‚¹{completedPartyProfitLoss.toLocaleString()}
+                </span>
+              </div>
+              <div className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl border border-gray-100">
                 <span className="text-gray-500 font-bold text-sm">Profit Margin:</span>
                 <span className="font-black text-primary-600">{profitMargin.toFixed(2)}%</span>
               </div>
@@ -506,6 +552,51 @@ export default function Reports({ onNavigate }: ReportsProps) {
             {partyInvestments.length === 0 && (
               <p className="col-span-full text-center py-8 text-gray-400 font-bold italic">No party purchases recorded yet.</p>
             )}
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+          <h3 className="text-lg font-black text-gray-900 mb-6 flex items-center gap-2">
+            <TrendingUp className="h-5 w-5 text-primary-600" />
+            Completed Party Purchase Profit/Loss
+          </h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="text-gray-400 text-[10px] uppercase font-black border-b border-gray-100">
+                  <th className="pb-4 px-2">Purchase</th>
+                  <th className="pb-4 px-2 text-right">Cost</th>
+                  <th className="pb-4 px-2 text-right">Transferred</th>
+                  <th className="pb-4 px-2 text-right">Sold</th>
+                  <th className="pb-4 px-2 text-right">Deducted</th>
+                  <th className="pb-4 px-2 text-right">Sold Amount</th>
+                  <th className="pb-4 px-2 text-right">Realized P/L</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {completedPartyPurchases.map(row => (
+                  <tr key={row.purchase.id} className="text-sm hover:bg-gray-50 transition-colors">
+                    <td className="py-4 px-2">
+                      <p className="font-black text-gray-900 uppercase">{row.purchase.item_name}</p>
+                      <p className="text-xs font-bold text-gray-400">{row.purchase.party_name}</p>
+                    </td>
+                    <td className="py-4 px-2 text-right font-black text-gray-900">â‚¹{row.purchaseCost.toLocaleString()}</td>
+                    <td className="py-4 px-2 text-right font-bold text-primary-700">{row.transferredQuantity}</td>
+                    <td className="py-4 px-2 text-right font-bold text-green-700">{row.soldQuantity}</td>
+                    <td className="py-4 px-2 text-right font-bold text-orange-700">{row.deductedQuantity}</td>
+                    <td className="py-4 px-2 text-right font-black text-blue-700">â‚¹{row.soldAmount.toLocaleString()}</td>
+                    <td className={`py-4 px-2 text-right font-black ${row.realizedProfitLoss >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                      â‚¹{row.realizedProfitLoss.toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+                {completedPartyPurchases.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="py-8 text-center text-gray-400 font-bold italic">No completed party purchases yet.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
