@@ -6,10 +6,11 @@ import {
   Package,
   Search,
   Plus,
-  X,
-  BarChart3,
+  Minus,
   Calendar,
-  AlertTriangle
+  AlertTriangle,
+  Trash2,
+  CheckCircle2
 } from 'lucide-react';
 import {
   getProducts,
@@ -18,19 +19,17 @@ import {
   adjustProductStock,
   markDamagedStock,
   createProduct,
-  getClosingStockForYear,
-  getAnalytics
+  getClosingStockForYear
 } from 'lib/offline-adapter';
 import { 
   getFinancialYear, 
-  getFYRange, 
   getFYList,
   formatFYLabel,
   formatDateToDisplay,
   parseDisplayDate
 } from 'lib/date-utils';
 import { addProductHistory } from 'lib/product-history';
-import { formatDateToDDMMYYYY, getCurrentDateISO } from '../utils/dateHelpers';
+import { getCurrentDateISO } from '../utils/dateHelpers';
 import type { Product, Sale, SaleInsert, ProductInsert } from 'supabase_client';
 import { useToast } from 'app/context/ToastContext';
 
@@ -59,6 +58,13 @@ const pricesMatch = (productPrice: number, searchPrice: number) =>
 const formatSearchPrice = (amount: number) =>
   Number.isInteger(amount) ? String(amount) : amount.toFixed(2);
 
+const formatCurrency = (value: number) =>
+  new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 2
+  }).format(value);
+
 export default function QuickSale({ onNavigate }: QuickSaleProps) {
   const { showToast } = useToast();
   const currentFY = getFinancialYear();
@@ -85,7 +91,6 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-  const [dateSales, setDateSales] = useState<Sale[]>([]);
   const [dateSummary, setDateSummary] = useState({ totalProducts: 0, totalAmount: 0, totalProfit: 0 });
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [showAddStockModal, setShowAddStockModal] = useState(false);
@@ -141,7 +146,6 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
     const fetchDateSales = async () => {
       try {
         const salesData = await getSalesByDate(saleDate);
-        setDateSales(salesData || []);
         
         const uniqueProducts = new Set((salesData || []).map(sale => sale.product_id));
         const summary = (salesData || []).reduce((acc, sale) => {
@@ -153,7 +157,6 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
         setDateSummary(summary);
       } catch (error) {
         console.error('Error fetching date sales:', error);
-        setDateSales([]);
         setDateSummary({ totalProducts: 0, totalAmount: 0, totalProfit: 0 });
       }
     };
@@ -203,6 +206,32 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
   const noResults = trimmedSearchTerm.length > 0 && filteredProducts.length === 0;
   const shouldShowAddProduct = isCurrentYear && noResults && priceSearchAmount === null;
   const quickAccessProducts = priceSearchAmount === null ? filteredProducts.slice(0, 10) : filteredProducts;
+  const cartTotal = cart.reduce((sum, item) => sum + (item.salePrice * item.quantity), 0);
+  const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+  const cartHasInsufficientStock = cart.some(item => item.quantity > item.product.stock_quantity);
+
+  const getStockBadge = (product: Product) => {
+    const stock = getDisplayStock(product);
+    if (stock <= 0) {
+      return {
+        label: 'Out',
+        className: 'border-red-200 bg-red-50 text-red-700',
+        dotClassName: 'bg-red-500'
+      };
+    }
+    if (stock <= product.min_stock_level) {
+      return {
+        label: 'Low',
+        className: 'border-amber-200 bg-amber-50 text-amber-700',
+        dotClassName: 'bg-amber-500'
+      };
+    }
+    return {
+      label: 'In stock',
+      className: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+      dotClassName: 'bg-emerald-500'
+    };
+  };
 
   const handleSaleDateChange = (displayValue: string) => {
     setSaleDateDisplay(displayValue);
@@ -302,7 +331,13 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
       }
 
       const updatedSalesData = await getSalesByDate(saleDate);
-      setDateSales(updatedSalesData || []);
+      const uniqueProducts = new Set((updatedSalesData || []).map(sale => sale.product_id));
+      const summary = (updatedSalesData || []).reduce((acc, sale) => {
+        acc.totalAmount += sale.total_amount;
+        acc.totalProfit += sale.profit;
+        return acc;
+      }, { totalProducts: uniqueProducts.size, totalAmount: 0, totalProfit: 0 });
+      setDateSummary(summary);
       setCart([]);
       showToast('Sale completed successfully!', 'success');
     } catch (error) {
@@ -375,213 +410,350 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
   };
 
   return (
-    <div className="p-6 bg-primary-50 min-h-screen">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6">
+    <div className="min-h-screen bg-gray-50 p-4 pb-24 sm:p-6">
+      <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Quick Sale</h1>
-          <p className="text-gray-600 mt-1">Process sales and manage daily transactions</p>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-3xl font-black text-gray-950">Quick Sale</h1>
+            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-black uppercase tracking-wide text-emerald-700">
+              POS mode
+            </span>
+          </div>
+          <p className="mt-1 text-sm font-medium text-gray-600">Find by name, barcode, or amount and check out from one screen.</p>
         </div>
-        <div className="bg-white border-2 border-primary-200 rounded-xl px-4 py-2 flex items-center gap-3 shadow-sm mt-4 sm:mt-0">
-          <Calendar className="h-5 w-5 text-primary-600" />
-          <div className="flex flex-col">
-            <span className="text-[10px] uppercase font-bold text-gray-400 leading-none mb-1">Financial Year</span>
-            <select 
-              value={financialYear}
-              onChange={(e) => setFinancialYear(e.target.value)}
-              className="bg-transparent text-sm font-bold text-primary-900 focus:outline-none cursor-pointer"
-            >
-              {getFYList().map(fy => (
-                <option key={fy} value={fy}>{formatFYLabel(fy)}</option>
-              ))}
-            </select>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+            <Calendar className="h-5 w-5 text-primary-600" />
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Financial Year</p>
+              <select
+                value={financialYear}
+                onChange={(e) => setFinancialYear(e.target.value)}
+                className="bg-transparent text-sm font-black text-gray-950 focus:outline-none"
+              >
+                {getFYList().map(fy => (
+                  <option key={fy} value={fy}>{formatFYLabel(fy)}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+            <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Sale Date</p>
+            <input
+              type="text"
+              value={saleDateDisplay}
+              onChange={(e) => handleSaleDateChange(e.target.value)}
+              className="w-32 bg-transparent text-sm font-black text-gray-950 focus:outline-none"
+              placeholder="DD/MM/YYYY"
+              disabled={!isCurrentYear}
+            />
           </div>
         </div>
       </div>
 
-      <div className="space-y-6">
-        {!isCurrentYear && (
-          <div className="bg-amber-50 border-l-4 border-amber-400 p-4 rounded-r-lg animate-in fade-in slide-in-from-top-2">
-            <div className="flex items-center gap-3">
-              <Package className="h-5 w-5 text-amber-600" />
-              <p className="text-amber-800 text-sm">
-                You are viewing historical data for <strong>{financialYear}</strong>. 
-                New sales and stock additions are only allowed in the <strong>Current Year ({currentFY})</strong>.
-              </p>
-            </div>
+      {!isCurrentYear && (
+        <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <div className="flex items-center gap-3">
+            <Package className="h-5 w-5 text-amber-600" />
+            <p className="text-sm font-semibold text-amber-800">
+              You are viewing historical data for <strong>{financialYear}</strong>. New sales and stock additions are only allowed in the current year ({currentFY}).
+            </p>
           </div>
-        )}
+        </div>
+      )}
 
-        <div className="card bg-primary-600 text-white p-4">
-          <div className="flex flex-col md:flex-row gap-4 items-center">
-            <div className="flex-shrink-0">
-              <label className="block text-xs font-medium mb-1 opacity-80">Sale Date</label>
-              <input
-                type="text"
-                value={saleDateDisplay}
-                onChange={(e) => handleSaleDateChange(e.target.value)}
-                className="input-field w-36 text-gray-900 font-semibold"
-                placeholder="DD/MM/YYYY"
-                disabled={!isCurrentYear}
-              />
-            </div>
-            <div className="flex-1 w-full relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+      <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+          <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Today Sold</p>
+          <p className="mt-1 text-2xl font-black text-gray-950">{dateSummary.totalProducts}</p>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+          <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Revenue</p>
+          <p className="mt-1 text-2xl font-black text-primary-700">{formatCurrency(dateSummary.totalAmount)}</p>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+          <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Profit</p>
+          <p className="mt-1 text-2xl font-black text-emerald-700">{formatCurrency(dateSummary.totalProfit)}</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_420px] xl:items-start">
+        <section className="space-y-4">
+          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+            <div className="relative">
+              <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" />
               <input
                 ref={searchInputRef}
                 type="text"
                 placeholder={isCurrentYear ? "Search products, amount, or scan barcode..." : "View-only mode for historical records"}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="input-field pl-10 w-full text-gray-900"
+                className="h-14 w-full rounded-xl border-2 border-gray-100 bg-gray-50 pl-12 pr-4 text-base font-bold text-gray-950 outline-none transition focus:border-primary-500 focus:bg-white focus:ring-4 focus:ring-primary-100"
                 disabled={!isCurrentYear}
               />
             </div>
-          </div>
-        </div>
-
-        <div className="card">
-          <h3 className="text-sm font-semibold text-gray-700 mb-3">
-            {isCurrentYear ? 'Quick Access' : `Historical Stock (${financialYear})`}
-          </h3>
-          {isCurrentYear && priceSearchAmount !== null && trimmedSearchTerm.length > 0 && (
-            <div className={`mb-3 rounded-lg border px-3 py-2 text-sm font-medium ${
-              priceMatchedProducts.length > 0
-                ? 'border-primary-200 bg-primary-50 text-primary-800'
-                : 'border-yellow-200 bg-yellow-50 text-yellow-800'
-            }`}>
-              {priceMatchedProducts.length > 0
-                ? `${priceMatchedProducts.length} product${priceMatchedProducts.length === 1 ? '' : 's'} at ₹${formatSearchPrice(priceSearchAmount)}`
-                : `No products found at ₹${formatSearchPrice(priceSearchAmount)}`}
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs font-bold">
+              <span className="text-gray-500">
+                Showing {quickAccessProducts.length} of {filteredProducts.length} matching product{filteredProducts.length === 1 ? '' : 's'}
+              </span>
+              <span className="rounded-full bg-gray-100 px-3 py-1 text-gray-600">Press / to search</span>
             </div>
-          )}
-          <div className="flex gap-3 overflow-x-auto pb-3">
-            {quickAccessProducts.map(product => {
-              const displayStock = getDisplayStock(product);
-              return (
-                <div
-                  key={product.id}
-                  onClick={() => isCurrentYear && addToCart(product)}
-                  className={`flex-shrink-0 w-40 p-3 border-2 border-gray-200 rounded-lg transition-all text-center ${isCurrentYear ? 'cursor-pointer hover:border-primary-500' : 'opacity-80 bg-gray-50'}`}
-                >
-                  <p className="font-bold text-sm text-gray-900 truncate">{product.name}</p>
-                  <p className="text-lg font-bold text-primary-600">₹{product.selling_price}</p>
-                  <p className={`text-xs ${displayStock <= product.min_stock_level ? 'text-red-600' : 'text-gray-500'}`}>
-                    {displayStock} left
-                  </p>
-                  {isCurrentYear && displayStock > 0 && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openDamageModal(product);
-                      }}
-                      className="mt-2 inline-flex items-center justify-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-bold text-red-700 hover:bg-red-100"
+            {isCurrentYear && priceSearchAmount !== null && trimmedSearchTerm.length > 0 && (
+              <div className={`mt-3 rounded-xl border px-4 py-3 text-sm font-black ${
+                priceMatchedProducts.length > 0
+                  ? 'border-primary-200 bg-primary-50 text-primary-800'
+                  : 'border-yellow-200 bg-yellow-50 text-yellow-800'
+              }`}>
+                {priceMatchedProducts.length > 0
+                  ? `${priceMatchedProducts.length} product${priceMatchedProducts.length === 1 ? '' : 's'} at ₹${formatSearchPrice(priceSearchAmount)}`
+                  : `No products found at ₹${formatSearchPrice(priceSearchAmount)}`}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-black text-gray-950">
+                  {isCurrentYear ? 'Products' : `Historical Stock (${financialYear})`}
+                </h2>
+                <p className="text-xs font-semibold text-gray-500">Tap a product to add it to the sale.</p>
+              </div>
+              {loading && <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary-600 border-t-transparent" />}
+            </div>
+
+            {loading ? (
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-4">
+                {Array.from({ length: 8 }).map((_, index) => (
+                  <div key={index} className="h-40 rounded-xl bg-gray-100 animate-pulse" />
+                ))}
+              </div>
+            ) : quickAccessProducts.length === 0 ? (
+              <div className="rounded-xl border-2 border-dashed border-gray-200 p-10 text-center">
+                <Package className="mx-auto mb-3 h-10 w-10 text-gray-300" />
+                <p className="font-bold text-gray-600">No products found.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-4">
+                {quickAccessProducts.map(product => {
+                  const displayStock = getDisplayStock(product);
+                  const stockBadge = getStockBadge(product);
+                  return (
+                    <div
+                      key={product.id}
+                      className={`group flex h-44 flex-col justify-between rounded-xl border-2 border-gray-100 bg-white p-3 text-left shadow-sm transition hover:border-primary-200 hover:shadow-md ${
+                        isCurrentYear ? '' : 'bg-gray-50 opacity-70'
+                      }`}
                     >
-                      <AlertTriangle className="h-3 w-3" />
-                      Damaged
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {shouldShowAddProduct && (
-            <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <button
-                onClick={() => handleAddNewProduct(searchTerm)}
-                className="btn-primary w-full flex items-center justify-center gap-2"
-              >
-                <Plus className="h-5 w-5" /> Add "{searchTerm.toUpperCase()}"
-              </button>
-            </div>
-          )}
-        </div>
-
-        <div className="card bg-gray-50">
-          <h3 className="text-lg font-semibold mb-4">Current Sale</h3>
-          {cart.length === 0 ? (
-            <div className="text-center py-12 bg-white border-2 border-dashed rounded-lg">
-              <ShoppingCart className="h-12 w-12 text-gray-300 mx-auto mb-2" />
-              <p className="text-gray-500">Cart is empty</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {cart.map((item, index) => (
-                <div key={`${item.product.id}-${index}`} className="bg-white border-2 border-gray-200 rounded-lg p-4">
-                  <div className="flex flex-col md:flex-row justify-between gap-4">
-                    <div className="flex-1">
-                      <p className="font-bold text-gray-900">{item.product.name}</p>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-xs text-gray-500">Stock: {item.product.stock_quantity}</p>
-                        {item.product.stock_quantity > 0 && (
+                      <div>
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-black uppercase ${stockBadge.className}`}>
+                            <span className={`h-1.5 w-1.5 rounded-full ${stockBadge.dotClassName}`} />
+                            {stockBadge.label}
+                          </span>
+                          <span className="text-xs font-black text-gray-400">{displayStock} left</span>
+                        </div>
+                        <p className="line-clamp-2 min-h-[40px] text-sm font-black leading-tight text-gray-950 group-hover:text-primary-700">
+                          {product.name}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-2xl font-black text-gray-950">{formatCurrency(product.selling_price)}</p>
+                        <div className="mt-2 flex items-center justify-between gap-2">
                           <button
-                            onClick={() => openDamageModal(item.product)}
-                            className="inline-flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-bold text-red-700 hover:bg-red-100"
+                            type="button"
+                            onClick={() => addToCart(product)}
+                            disabled={!isCurrentYear}
+                            className="inline-flex items-center gap-1 rounded-lg bg-primary-50 px-2 py-1 text-xs font-black text-primary-700 hover:bg-primary-100 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            <AlertTriangle className="h-3 w-3" />
-                            Damaged
+                            <Plus className="h-3.5 w-3.5" />
+                            Add
                           </button>
-                        )}
+                          {isCurrentYear && displayStock > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => openDamageModal(product)}
+                              className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-black text-red-700 hover:bg-red-100"
+                            >
+                              <AlertTriangle className="h-3 w-3" />
+                              Damaged
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => updateCartItem(index, 'quantity', Math.max(1, item.quantity - 1))} className="w-8 h-8 border border-primary-500 rounded text-primary-600">-</button>
-                      <input type="number" value={item.quantity} onChange={(e) => updateCartItem(index, 'quantity', parseInt(e.target.value) || 1)} className="w-12 text-center border rounded" />
-                      <button onClick={() => updateCartItem(index, 'quantity', item.quantity + 1)} className="w-8 h-8 border border-primary-500 rounded text-primary-600">+</button>
-                    </div>
-                    <div className="w-24">
-                      <input type="number" value={item.salePrice} onChange={(e) => updateCartItem(index, 'salePrice', parseFloat(e.target.value) || 0)} className="w-full border rounded px-2" />
-                    </div>
-                    <div className="text-right">
-                      <p className="font-bold">₹{(item.salePrice * item.quantity).toFixed(2)}</p>
-                      <button onClick={() => removeFromCart(index)} className="text-red-500"><X className="h-5 w-5" /></button>
-                    </div>
-                  </div>
-                  {item.quantity > item.product.stock_quantity && (
-                    <div className="mt-2 text-red-600 text-xs flex items-center gap-2">
-                      <span>Insufficient stock!</span>
-                      <button onClick={() => {setAddStockProduct(item.product); setAddStockQuantity(item.quantity - item.product.stock_quantity); setAddStockReason('Stock added during quick sale'); setShowAddStockModal(true);}} className="bg-primary-500 text-white px-2 py-0.5 rounded">Add Stock</button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+                  );
+                })}
+              </div>
+            )}
 
-        {cart.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="card bg-secondary-600 text-white text-center p-6">
-              <p className="text-sm opacity-80">TOTAL</p>
-              <p className="text-4xl font-bold">₹{cart.reduce((s, i) => s + (i.salePrice * i.quantity), 0).toFixed(2)}</p>
+            {shouldShowAddProduct && (
+              <div className="mt-4 rounded-xl border border-yellow-200 bg-yellow-50 p-4">
+                <button
+                  type="button"
+                  onClick={() => handleAddNewProduct(searchTerm)}
+                  className="btn-primary flex w-full items-center justify-center gap-2"
+                >
+                  <Plus className="h-5 w-5" /> Add "{searchTerm.toUpperCase()}"
+                </button>
+              </div>
+            )}
+          </div>
+        </section>
+
+        <aside className="rounded-2xl border border-gray-200 bg-white shadow-sm xl:sticky xl:top-24">
+          <div className="border-b border-gray-100 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-black text-gray-950">Current Sale</h2>
+                <p className="text-xs font-semibold text-gray-500">{cartItemCount} item{cartItemCount === 1 ? '' : 's'} in cart</p>
+              </div>
+              <div className="rounded-xl bg-primary-50 p-3 text-primary-700">
+                <ShoppingCart className="h-6 w-6" />
+              </div>
             </div>
-            <button 
-              onClick={handleCompleteSale} 
-              disabled={processing || !isCurrentYear} 
-              className={`card bg-primary-600 text-white text-xl font-bold flex items-center justify-center gap-2 hover:bg-primary-700 ${!isCurrentYear ? 'opacity-50 cursor-not-allowed' : ''}`}
+          </div>
+
+          <div className="max-h-[52vh] overflow-y-auto p-4">
+            {cart.length === 0 ? (
+              <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 px-4 py-12 text-center">
+                <ShoppingCart className="mx-auto mb-3 h-12 w-12 text-gray-300" />
+                <p className="font-black text-gray-700">Cart is empty</p>
+                <p className="mt-1 text-sm text-gray-500">Add products from the left panel.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {cart.map((item, index) => (
+                  <div key={`${item.product.id}-${index}`} className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
+                    <div className="mb-3 flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate font-black text-gray-950">{item.product.name}</p>
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          <span className="text-xs font-bold text-gray-500">Stock: {item.product.stock_quantity}</span>
+                          {item.product.stock_quantity > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => openDamageModal(item.product)}
+                              className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-black text-red-700 hover:bg-red-100"
+                            >
+                              <AlertTriangle className="h-3 w-3" />
+                              Damaged
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeFromCart(index)}
+                        className="rounded-lg p-2 text-red-500 hover:bg-red-50"
+                        aria-label={`Remove ${item.product.name}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-[116px_1fr] gap-3">
+                      <div className="flex h-11 items-center rounded-xl border border-gray-200 bg-gray-50">
+                        <button
+                          type="button"
+                          onClick={() => updateCartItem(index, 'quantity', Math.max(1, item.quantity - 1))}
+                          className="flex h-full w-9 items-center justify-center text-gray-600 hover:text-primary-700"
+                          aria-label="Decrease quantity"
+                        >
+                          <Minus className="h-4 w-4" />
+                        </button>
+                        <input
+                          type="number"
+                          min="1"
+                          value={item.quantity}
+                          onChange={(e) => updateCartItem(index, 'quantity', parseInt(e.target.value) || 1)}
+                          className="h-full w-10 bg-transparent text-center text-sm font-black text-gray-950 outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => updateCartItem(index, 'quantity', item.quantity + 1)}
+                          className="flex h-full w-9 items-center justify-center text-gray-600 hover:text-primary-700"
+                          aria-label="Increase quantity"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <div>
+                        <label className="sr-only">Sale price</label>
+                        <input
+                          type="number"
+                          value={item.salePrice}
+                          onChange={(e) => updateCartItem(index, 'salePrice', parseFloat(e.target.value) || 0)}
+                          className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-right text-sm font-black text-gray-950 outline-none focus:border-primary-500 focus:bg-white"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex items-center justify-between">
+                      <span className="text-xs font-black uppercase tracking-widest text-gray-400">Line total</span>
+                      <span className="text-lg font-black text-gray-950">{formatCurrency(item.salePrice * item.quantity)}</span>
+                    </div>
+
+                    {item.quantity > item.product.stock_quantity && (
+                      <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-xs font-black text-red-700">Insufficient stock</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAddStockProduct(item.product);
+                              setAddStockQuantity(item.quantity - item.product.stock_quantity);
+                              setAddStockReason('Stock added during quick sale');
+                              setShowAddStockModal(true);
+                            }}
+                            className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-black text-white hover:bg-primary-700"
+                          >
+                            Add Stock
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="border-t border-gray-100 p-4">
+            <div className="mb-4 rounded-2xl bg-gray-950 p-4 text-white">
+              <p className="text-xs font-black uppercase tracking-widest text-gray-300">Total</p>
+              <p className="mt-1 text-4xl font-black">{formatCurrency(cartTotal)}</p>
+            </div>
+            {cartHasInsufficientStock && (
+              <div className="mb-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-700">
+                Resolve stock shortage before checkout.
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={handleCompleteSale}
+              disabled={processing || !isCurrentYear || cart.length === 0 || cartHasInsufficientStock}
+              className="flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-primary-600 text-base font-black text-white shadow-lg transition hover:bg-primary-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
             >
+              <CheckCircle2 className="h-5 w-5" />
               {processing ? 'Processing...' : 'Complete Sale'}
             </button>
-          </div>
-        )}
-
-        <div className="card">
-          <h3 className="text-lg font-semibold mb-4">Summary for {formatDateToDDMMYYYY(saleDate)}</h3>
-          <div className="grid grid-cols-3 gap-4 mb-6">
-            <div className="bg-primary-50 p-4 rounded text-center">
-              <p className="text-xs text-primary-600">Sold</p>
-              <p className="text-xl font-bold">{dateSummary.totalProducts}</p>
-            </div>
-            <div className="bg-secondary-50 p-4 rounded text-center">
-              <p className="text-xs text-secondary-600">Revenue</p>
-              <p className="text-xl font-bold">₹{dateSummary.totalAmount.toFixed(2)}</p>
-            </div>
-            <div className="bg-accent-50 p-4 rounded text-center">
-              <p className="text-xs text-accent-600">Profit</p>
-              <p className="text-xl font-bold">₹{dateSummary.totalProfit.toFixed(2)}</p>
+            <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-xl bg-gray-50 p-3">
+                <p className="text-[10px] font-black uppercase text-gray-400">Sold</p>
+                <p className="font-black text-gray-950">{dateSummary.totalProducts}</p>
+              </div>
+              <div className="rounded-xl bg-gray-50 p-3">
+                <p className="text-[10px] font-black uppercase text-gray-400">Revenue</p>
+                <p className="text-xs font-black text-gray-950">{formatCurrency(dateSummary.totalAmount)}</p>
+              </div>
+              <div className="rounded-xl bg-gray-50 p-3">
+                <p className="text-[10px] font-black uppercase text-gray-400">Profit</p>
+                <p className="text-xs font-black text-gray-950">{formatCurrency(dateSummary.totalProfit)}</p>
+              </div>
             </div>
           </div>
-        </div>
+        </aside>
       </div>
 
       {showAddStockModal && addStockProduct && (
