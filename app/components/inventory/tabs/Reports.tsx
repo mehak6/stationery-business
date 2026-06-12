@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   getProducts,
   getSales,
@@ -47,6 +47,8 @@ export default function Reports({ onNavigate }: ReportsProps) {
   const [endDateDisplay, setEndDateDisplay] = useState(getCurrentDateDisplay());
   const [filterApplied, setFilterApplied] = useState(false);
   const [isCustomRange, setIsCustomRange] = useState(false);
+  const startDateInputRef = useRef<HTMLInputElement>(null);
+  const endDateInputRef = useRef<HTMLInputElement>(null);
 
   const isCurrentYear = financialYear === getFinancialYear() && !isCustomRange;
 
@@ -91,12 +93,15 @@ export default function Reports({ onNavigate }: ReportsProps) {
   };
 
   const applyDateFilter = async () => {
-    if (startDate && endDate) {
+    const effectiveStartDate = startDateInputRef.current?.value || startDate;
+    const effectiveEndDate = endDateInputRef.current?.value || endDate;
+
+    if (effectiveStartDate && effectiveEndDate) {
       try {
         setLoading(true);
         setIsCustomRange(true);
         const [filteredSales, productsData, partyData] = await Promise.all([
-          getSalesByDateRange(startDate, endDate),
+          getSalesByDateRange(effectiveStartDate, effectiveEndDate),
           getProducts(),
           getPartyPurchases()
         ]);
@@ -105,8 +110,10 @@ export default function Reports({ onNavigate }: ReportsProps) {
         setPartyPurchases(partyData || []);
         setPartyPerformance(await getPartyPurchasePerformance((partyData || []).map(p => p.id)));
         setFilterApplied(true);
-        setStartDateDisplay(formatDateToDDMMYYYY(startDate));
-        setEndDateDisplay(formatDateToDDMMYYYY(endDate));
+        setStartDate(effectiveStartDate);
+        setEndDate(effectiveEndDate);
+        setStartDateDisplay(formatDateToDDMMYYYY(effectiveStartDate));
+        setEndDateDisplay(formatDateToDDMMYYYY(effectiveEndDate));
       } catch (error) {
         console.error('Error applying date filter:', error);
       } finally {
@@ -148,6 +155,13 @@ export default function Reports({ onNavigate }: ReportsProps) {
       monthly_performance: Object.entries(monthlyData).map(([month, data]) => ({
         month,
         ...data
+      })),
+      daily_sales_totals: dailySalesTotals.map(day => ({
+        sale_date: day.date,
+        transactions: day.transactions,
+        items_sold: day.quantity,
+        revenue: day.revenue,
+        profit: day.profit
       })),
       top_performing_products: topProducts.map(p => ({
         name: p.name,
@@ -213,6 +227,29 @@ export default function Reports({ onNavigate }: ReportsProps) {
   const totalQuantitySold = sales.reduce((sum, s) => sum + s.quantity, 0);
   const avgSaleValue = sales.length > 0 ? totalSalesRevenue / sales.length : 0;
   const totalItemsInInventory = products.reduce((sum, p) => sum + getStockForProduct(p), 0);
+
+  const dailySalesTotals = Object.values(
+    sales.reduce<Record<string, { date: string; revenue: number; profit: number; quantity: number; transactions: number }>>((acc, sale) => {
+      const date = (sale.sale_date || '').split('T')[0];
+      if (!date) return acc;
+
+      if (!acc[date]) {
+        acc[date] = {
+          date,
+          revenue: 0,
+          profit: 0,
+          quantity: 0,
+          transactions: 0
+        };
+      }
+
+      acc[date].revenue += Number(sale.total_amount || 0);
+      acc[date].profit += Number(sale.profit || 0);
+      acc[date].quantity += Number(sale.quantity || 0);
+      acc[date].transactions += 1;
+      return acc;
+    }, {})
+  ).sort((a, b) => b.date.localeCompare(a.date));
 
   // Calculate party-wise investment
   const partyInvestmentMap = partyPurchases.reduce((acc: Record<string, number>, purchase) => {
@@ -296,6 +333,7 @@ export default function Reports({ onNavigate }: ReportsProps) {
             <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-xl border border-gray-100">
               <span className="text-[10px] uppercase font-black text-gray-400">From</span>
               <input 
+                ref={startDateInputRef}
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
@@ -305,6 +343,7 @@ export default function Reports({ onNavigate }: ReportsProps) {
             <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-xl border border-gray-100">
               <span className="text-[10px] uppercase font-black text-gray-400">To</span>
               <input 
+                ref={endDateInputRef}
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
@@ -523,6 +562,50 @@ export default function Reports({ onNavigate }: ReportsProps) {
                     <span className="text-[10px] font-black text-orange-600 bg-orange-50 px-2 py-1 rounded-lg uppercase">Average</span>
                   </td>
                 </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+            <h3 className="text-lg font-black text-gray-900 flex items-center gap-2">
+              <Calendar className="h-5 w-5 text-primary-600" />
+              Daily Sales Totals
+            </h3>
+            <div className="text-[10px] font-black text-gray-500 bg-gray-50 px-4 py-2 rounded-full border border-gray-100 uppercase tracking-widest">
+              {dailySalesTotals.length} sale date{dailySalesTotals.length === 1 ? '' : 's'}
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="text-gray-400 text-[10px] uppercase font-black border-b border-gray-100 tracking-tighter">
+                  <th className="pb-4 px-2">Date</th>
+                  <th className="pb-4 px-2 text-right">Orders</th>
+                  <th className="pb-4 px-2 text-right">Items Sold</th>
+                  <th className="pb-4 px-2 text-right">Total Sale</th>
+                  <th className="pb-4 px-2 text-right">Profit</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {dailySalesTotals.map(day => (
+                  <tr key={day.date} className="text-sm hover:bg-gray-50 transition-colors">
+                    <td className="py-4 px-2 font-black text-gray-900">{formatDateToDDMMYYYY(day.date)}</td>
+                    <td className="py-4 px-2 text-right font-bold text-gray-700">{day.transactions}</td>
+                    <td className="py-4 px-2 text-right font-bold text-primary-700">{day.quantity}</td>
+                    <td className="py-4 px-2 text-right font-black text-blue-700">₹{day.revenue.toLocaleString('en-IN')}</td>
+                    <td className="py-4 px-2 text-right font-black text-green-700">₹{day.profit.toLocaleString('en-IN')}</td>
+                  </tr>
+                ))}
+                {dailySalesTotals.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-gray-400 font-bold italic">
+                      No sales found for this date range.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

@@ -15,6 +15,7 @@ import {
 import {
   getProducts,
   getSalesByDate,
+  getSalesByDateRange,
   createSale,
   adjustProductStock,
   markDamagedStock,
@@ -23,6 +24,7 @@ import {
 } from 'lib/offline-adapter';
 import { 
   getFinancialYear, 
+  getFYRange,
   getFYList,
   formatFYLabel,
   formatDateToDisplay,
@@ -90,6 +92,7 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
   });
   const [searchTerm, setSearchTerm] = useState('');
   const [products, setProducts] = useState<Product[]>([]);
+  const [popularSales, setPopularSales] = useState<Sale[]>([]);
   const [loading, setLoading] = useState(true);
   const [dateSummary, setDateSummary] = useState({ totalProducts: 0, totalAmount: 0, totalProfit: 0 });
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -116,8 +119,13 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const productsData = await getProducts();
+        const range = getFYRange(financialYear);
+        const [productsData, salesData] = await Promise.all([
+          getProducts(),
+          getSalesByDateRange(range.start, range.end)
+        ]);
         setProducts(productsData || []);
+        setPopularSales(salesData || []);
 
         if (!isCurrentYear) {
           const closingData = await getClosingStockForYear(financialYear);
@@ -203,9 +211,31 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
     );
   });
 
+  const productUsageMap = popularSales.reduce<Record<string, { quantity: number; revenue: number; transactions: number }>>((acc, sale) => {
+    if (!acc[sale.product_id]) acc[sale.product_id] = { quantity: 0, revenue: 0, transactions: 0 };
+    acc[sale.product_id].quantity += Number(sale.quantity || 0);
+    acc[sale.product_id].revenue += Number(sale.total_amount || 0);
+    acc[sale.product_id].transactions += 1;
+    return acc;
+  }, {});
+
+  const mostlyUsedProducts = products
+    .filter(product => productUsageMap[product.id]?.quantity > 0)
+    .sort((a, b) => {
+      const aUsage = productUsageMap[a.id];
+      const bUsage = productUsageMap[b.id];
+      return (bUsage.quantity - aUsage.quantity) ||
+        (bUsage.revenue - aUsage.revenue) ||
+        a.name.localeCompare(b.name);
+    })
+    .slice(0, 10);
+
   const noResults = trimmedSearchTerm.length > 0 && filteredProducts.length === 0;
   const shouldShowAddProduct = isCurrentYear && noResults && priceSearchAmount === null;
-  const quickAccessProducts = priceSearchAmount === null ? filteredProducts.slice(0, 10) : filteredProducts;
+  const isShowingMostlyUsed = trimmedSearchTerm.length === 0 && priceSearchAmount === null && mostlyUsedProducts.length > 0;
+  const quickAccessProducts = priceSearchAmount === null
+    ? (isShowingMostlyUsed ? mostlyUsedProducts : filteredProducts.slice(0, 10))
+    : filteredProducts;
   const cartTotal = cart.reduce((sum, item) => sum + (item.salePrice * item.quantity), 0);
   const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
   const cartHasInsufficientStock = cart.some(item => item.quantity > item.product.stock_quantity);
@@ -307,6 +337,7 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
 
     try {
       setProcessing(true);
+      const completedSales: Sale[] = [];
       for (const item of cart) {
         const totalAmount = item.salePrice * item.quantity;
         const profit = (item.salePrice - item.product.purchase_price) * item.quantity;
@@ -321,7 +352,8 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
         };
 
         // This call now handles stock update atomically (via RPC/Trigger online or offline-db logic)
-        await createSale(saleData);
+        const createdSale = await createSale(saleData);
+        completedSales.push(createdSale);
 
         // Update local products state for immediate UI feedback
         const newStockQuantity = item.product.stock_quantity - item.quantity;
@@ -338,6 +370,7 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
         return acc;
       }, { totalProducts: uniqueProducts.size, totalAmount: 0, totalProfit: 0 });
       setDateSummary(summary);
+      setPopularSales(prev => [...completedSales, ...prev]);
       setCart([]);
       showToast('Sale completed successfully!', 'success');
     } catch (error) {
@@ -494,7 +527,9 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
             </div>
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs font-bold">
               <span className="text-gray-500">
-                Showing {quickAccessProducts.length} of {filteredProducts.length} matching product{filteredProducts.length === 1 ? '' : 's'}
+                {isShowingMostlyUsed
+                  ? `Showing ${quickAccessProducts.length} mostly used product${quickAccessProducts.length === 1 ? '' : 's'} from ${formatFYLabel(financialYear)}`
+                  : `Showing ${quickAccessProducts.length} of ${filteredProducts.length} matching product${filteredProducts.length === 1 ? '' : 's'}`}
               </span>
               <span className="rounded-full bg-gray-100 px-3 py-1 text-gray-600">Press / to search</span>
             </div>
@@ -515,9 +550,11 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-black text-gray-950">
-                  {isCurrentYear ? 'Products' : `Historical Stock (${financialYear})`}
+                  {isShowingMostlyUsed ? 'Mostly Used Products' : (isCurrentYear ? 'Products' : `Historical Stock (${financialYear})`)}
                 </h2>
-                <p className="text-xs font-semibold text-gray-500">Tap a product to add it to the sale.</p>
+                <p className="text-xs font-semibold text-gray-500">
+                  {isShowingMostlyUsed ? 'Sorted by quantity sold. Search still finds any product by name, barcode, or amount.' : 'Tap a product to add it to the sale.'}
+                </p>
               </div>
               {loading && <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary-600 border-t-transparent" />}
             </div>
@@ -538,6 +575,7 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
                 {quickAccessProducts.map(product => {
                   const displayStock = getDisplayStock(product);
                   const stockBadge = getStockBadge(product);
+                  const usageStats = productUsageMap[product.id];
                   return (
                     <div
                       key={product.id}
@@ -553,6 +591,11 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
                           </span>
                           <span className="text-xs font-black text-gray-400">{displayStock} left</span>
                         </div>
+                        {isShowingMostlyUsed && usageStats && (
+                          <div className="mb-2 inline-flex rounded-full bg-blue-50 px-2 py-1 text-[10px] font-black uppercase text-blue-700">
+                            {usageStats.quantity} sold
+                          </div>
+                        )}
                         <p className="line-clamp-2 min-h-[40px] text-sm font-black leading-tight text-gray-950 group-hover:text-primary-700">
                           {product.name}
                         </p>
