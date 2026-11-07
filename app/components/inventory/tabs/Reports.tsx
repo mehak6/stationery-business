@@ -6,9 +6,7 @@ import {
   getSales,
   getPartyPurchases,
   getSalesByDateRange,
-  getClosingStockForYear,
-  getPartyPurchasePerformance,
-  type PartyPurchasePerformance
+  getClosingStockForYear
 } from 'lib/offline-adapter';
 import { 
   getFinancialYear, 
@@ -33,12 +31,18 @@ interface ReportsProps {
   onNavigate: (view: string) => void;
 }
 
+const formatCurrency = (value: number, maximumFractionDigits = 0) =>
+  new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits
+  }).format(Number(value || 0));
+
 export default function Reports({ onNavigate }: ReportsProps) {
   const [loading, setLoading] = useState(true);
   const [products, setProducts] = useState<Product[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
   const [partyPurchases, setPartyPurchases] = useState<PartyPurchase[]>([]);
-  const [partyPerformance, setPartyPerformance] = useState<Record<string, PartyPurchasePerformance>>({});
   const [financialYear, setFinancialYear] = useState(getFinancialYear());
   const [historicalStock, setHistoricalStock] = useState<Record<string, number>>({});
   const [startDate, setStartDate] = useState('');
@@ -83,7 +87,6 @@ export default function Reports({ onNavigate }: ReportsProps) {
       setProducts(productsData || []);
       setSales(salesData || []);
       setPartyPurchases(partyData || []);
-      setPartyPerformance(await getPartyPurchasePerformance((partyData || []).map(p => p.id)));
       setHistoricalStock(closingData || {});
     } catch (error) {
       console.error('Error fetching reports data:', error);
@@ -108,7 +111,6 @@ export default function Reports({ onNavigate }: ReportsProps) {
         setSales(filteredSales || []);
         setProducts(productsData || []);
         setPartyPurchases(partyData || []);
-        setPartyPerformance(await getPartyPurchasePerformance((partyData || []).map(p => p.id)));
         setFilterApplied(true);
         setStartDate(effectiveStartDate);
         setEndDate(effectiveEndDate);
@@ -169,15 +171,13 @@ export default function Reports({ onNavigate }: ReportsProps) {
         revenue: p.salesData.revenue,
         profit: p.salesData.profit
       })),
-      completed_party_purchases: completedPartyPurchases.map(row => ({
-        party_name: row.purchase.party_name,
-        item_name: row.purchase.item_name,
-        purchase_cost: row.purchaseCost,
-        transferred_quantity: row.transferredQuantity,
-        sold_quantity: row.soldQuantity,
-        deducted_quantity: row.deductedQuantity,
-        sold_amount: row.soldAmount,
-        realized_profit_loss: row.realizedProfitLoss
+      product_sales_quantity: productSalesSummary.map(row => ({
+        product_name: row.name,
+        quantity_sold: row.quantity,
+        transactions: row.transactions,
+        revenue: row.revenue,
+        profit: row.profit,
+        current_stock: row.currentStock
       })),
       period_covered: {
         start: startDateDisplay,
@@ -211,12 +211,34 @@ export default function Reports({ onNavigate }: ReportsProps) {
   const currentInventoryValue = products.reduce((sum, p) => sum + (p.selling_price * getStockForProduct(p)), 0);
 
   const productSalesMap = sales.reduce((acc: Record<string, any>, sale) => {
-    if (!acc[sale.product_id]) acc[sale.product_id] = { revenue: 0, profit: 0, quantity: 0 };
+    if (!acc[sale.product_id]) acc[sale.product_id] = { revenue: 0, profit: 0, quantity: 0, transactions: 0 };
     acc[sale.product_id].revenue += sale.total_amount;
     acc[sale.product_id].profit += sale.profit;
     acc[sale.product_id].quantity += sale.quantity;
+    acc[sale.product_id].transactions += 1;
     return acc;
   }, {});
+
+  const productMap = new Map(products.map(product => [product.id, product]));
+
+  const productSalesSummary = Object.entries(productSalesMap)
+    .map(([productId, salesData]) => {
+      const product = productMap.get(productId);
+      return {
+        id: productId,
+        name: product?.name || 'Unknown Product',
+        quantity: Number(salesData.quantity || 0),
+        transactions: Number(salesData.transactions || 0),
+        revenue: Number(salesData.revenue || 0),
+        profit: Number(salesData.profit || 0),
+        currentStock: product ? getStockForProduct(product) : null
+      };
+    })
+    .sort((a, b) =>
+      (b.quantity - a.quantity) ||
+      (b.revenue - a.revenue) ||
+      a.name.localeCompare(b.name)
+    );
 
   const topProducts = products
     .map(p => ({ ...p, salesData: productSalesMap[p.id] || { revenue: 0, profit: 0, quantity: 0 } }))
@@ -262,29 +284,6 @@ export default function Reports({ onNavigate }: ReportsProps) {
   const partyInvestments = Object.entries(partyInvestmentMap)
     .map(([name, investment]) => ({ name, investment }))
     .sort((a, b) => b.investment - a.investment);
-
-  const completedPartyPurchases = partyPurchases
-    .filter(purchase => purchase.remaining_quantity <= 0)
-    .map(purchase => {
-      const performance = partyPerformance[purchase.id];
-      const purchaseCost = purchase.purchase_price * purchase.purchased_quantity;
-      const soldAmount = performance?.soldAmount || 0;
-      const deductedCost = performance?.deductedCost || 0;
-      const realizedProfitLoss = (performance?.soldProfit || 0) - deductedCost;
-
-      return {
-        purchase,
-        purchaseCost,
-        soldAmount,
-        deductedQuantity: performance?.deductedQuantity || 0,
-        soldQuantity: performance?.soldQuantity || 0,
-        transferredQuantity: performance?.transferredQuantity || 0,
-        realizedProfitLoss
-      };
-    })
-    .sort((a, b) => Math.abs(b.realizedProfitLoss) - Math.abs(a.realizedProfitLoss));
-
-  const completedPartyProfitLoss = completedPartyPurchases.reduce((sum, row) => sum + row.realizedProfitLoss, 0);
 
   if (loading) return (
     <div className="p-12 flex flex-col items-center justify-center min-h-[60vh]">
@@ -394,9 +393,9 @@ export default function Reports({ onNavigate }: ReportsProps) {
               <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-1 rounded-full uppercase tracking-wider">Revenue</span>
             </div>
             <p className="text-sm font-bold text-gray-400 uppercase tracking-tight">Total Sales</p>
-            <p className="text-3xl font-black text-gray-900 mt-1">₹{totalSalesRevenue.toLocaleString('en-IN')}</p>
+            <p className="text-3xl font-black text-gray-900 mt-1">{formatCurrency(totalSalesRevenue)}</p>
             <div className="flex items-center gap-1 mt-2">
-              <span className="text-xs font-bold text-blue-600">₹{totalCostOfGoodsSold.toLocaleString()}</span>
+              <span className="text-xs font-bold text-blue-600">{formatCurrency(totalCostOfGoodsSold)}</span>
               <span className="text-[10px] text-gray-400 font-medium">COGS</span>
             </div>
           </div>
@@ -412,7 +411,7 @@ export default function Reports({ onNavigate }: ReportsProps) {
               <span className="text-[10px] font-black text-green-600 bg-green-50 px-2 py-1 rounded-full">+{profitMargin.toFixed(1)}%</span>
             </div>
             <p className="text-sm font-bold text-gray-400 uppercase tracking-tight">Net Profit</p>
-            <p className="text-3xl font-black text-green-600 mt-1">₹{totalProfit.toLocaleString('en-IN')}</p>
+            <p className="text-3xl font-black text-green-600 mt-1">{formatCurrency(totalProfit)}</p>
             <p className="text-xs text-gray-400 mt-2 font-medium">Earnings after costs</p>
           </div>
 
@@ -427,7 +426,7 @@ export default function Reports({ onNavigate }: ReportsProps) {
               <span className="text-[10px] font-black text-orange-600 bg-orange-50 px-2 py-1 rounded-full uppercase tracking-wider">Capital</span>
             </div>
             <p className="text-sm font-bold text-gray-400 uppercase tracking-tight">Stock Investment</p>
-            <p className="text-3xl font-black text-gray-900 mt-1">₹{totalInvestment.toLocaleString('en-IN')}</p>
+            <p className="text-3xl font-black text-gray-900 mt-1">{formatCurrency(totalInvestment)}</p>
             <div className="flex items-center gap-1 mt-2">
               <span className="text-xs font-bold text-orange-600">{totalItemsInInventory.toLocaleString()}</span>
               <span className="text-[10px] text-gray-400 font-medium">items in hand</span>
@@ -446,7 +445,7 @@ export default function Reports({ onNavigate }: ReportsProps) {
             <p className="text-sm font-bold text-gray-400 uppercase tracking-tight">Orders Processed</p>
             <p className="text-3xl font-black text-gray-900 mt-1">{sales.length.toLocaleString()}</p>
             <div className="flex items-center gap-1 mt-2">
-              <span className="text-xs font-bold text-purple-600">₹{avgSaleValue.toLocaleString(undefined, {maximumFractionDigits: 0})}</span>
+              <span className="text-xs font-bold text-purple-600">{formatCurrency(avgSaleValue)}</span>
               <span className="text-[10px] text-gray-400 font-medium">avg per order</span>
             </div>
           </div>
@@ -462,21 +461,15 @@ export default function Reports({ onNavigate }: ReportsProps) {
             <div className="space-y-3">
               <div className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl border border-gray-100">
                 <span className="text-gray-500 font-bold text-sm">Gross Sales:</span>
-                <span className="font-black text-lg">₹{totalSalesRevenue.toLocaleString()}</span>
+                <span className="font-black text-lg">{formatCurrency(totalSalesRevenue)}</span>
               </div>
               <div className="flex justify-between items-center p-4 bg-green-50/50 rounded-2xl border border-green-100">
                 <span className="text-green-700 font-bold text-sm">Net Profit:</span>
-                <span className="font-black text-xl text-green-700">₹{totalProfit.toLocaleString()}</span>
+                <span className="font-black text-xl text-green-700">{formatCurrency(totalProfit)}</span>
               </div>
               <div className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl border border-gray-100">
                 <span className="text-gray-500 font-bold text-sm">Purchase Costs (COGS):</span>
-                <span className="font-black">₹{totalCostOfGoodsSold.toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl border border-gray-100">
-                <span className="text-gray-500 font-bold text-sm">Completed Party Realized P/L:</span>
-                <span className={`font-black ${completedPartyProfitLoss >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                  â‚¹{completedPartyProfitLoss.toLocaleString()}
-                </span>
+                <span className="font-black">{formatCurrency(totalCostOfGoodsSold)}</span>
               </div>
               <div className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl border border-gray-100">
                 <span className="text-gray-500 font-bold text-sm">Profit Margin:</span>
@@ -493,15 +486,15 @@ export default function Reports({ onNavigate }: ReportsProps) {
             <div className="space-y-3">
               <div className="flex justify-between items-center p-4 bg-blue-50/50 rounded-2xl border border-blue-100">
                 <span className="text-blue-700 font-bold text-sm">Total Sales Value:</span>
-                <span className="font-black text-xl text-blue-700">₹{currentInventoryValue.toLocaleString()}</span>
+                <span className="font-black text-xl text-blue-700">{formatCurrency(currentInventoryValue)}</span>
               </div>
               <div className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl border border-gray-100">
                 <span className="text-gray-500 font-bold text-sm">Stock Purchase Cost:</span>
-                <span className="font-black text-lg">₹{totalInvestment.toLocaleString()}</span>
+                <span className="font-black text-lg">{formatCurrency(totalInvestment)}</span>
               </div>
               <div className="flex justify-between items-center p-4 bg-green-50/50 rounded-2xl border border-green-100">
                 <span className="text-green-700 font-bold text-sm">Potential Profit:</span>
-                <span className="font-black text-green-700">₹{(currentInventoryValue - totalProductInvestment).toLocaleString()}</span>
+                <span className="font-black text-green-700">{formatCurrency(currentInventoryValue - totalProductInvestment)}</span>
               </div>
               <div className="flex justify-between items-center p-4 bg-gray-50 rounded-2xl border border-gray-100">
                 <span className="text-gray-500 font-bold text-sm">Items in Stock:</span>
@@ -532,14 +525,14 @@ export default function Reports({ onNavigate }: ReportsProps) {
               <tbody className="divide-y divide-gray-50">
                 <tr className="text-sm group hover:bg-gray-50 transition-colors">
                   <td className="py-5 px-2 font-bold text-gray-700">Total Revenue Generated</td>
-                  <td className="py-5 px-2 text-right font-black text-gray-900">₹{totalSalesRevenue.toLocaleString()}</td>
+                  <td className="py-5 px-2 text-right font-black text-gray-900">{formatCurrency(totalSalesRevenue)}</td>
                   <td className="py-5 px-2 text-right">
                     <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-1 rounded-lg uppercase">Income</span>
                   </td>
                 </tr>
                 <tr className="text-sm group hover:bg-gray-50 transition-colors">
                   <td className="py-5 px-2 font-bold text-gray-700">Total Profit Earned</td>
-                  <td className="py-5 px-2 text-right font-black text-green-600">₹{totalProfit.toLocaleString()}</td>
+                  <td className="py-5 px-2 text-right font-black text-green-600">{formatCurrency(totalProfit)}</td>
                   <td className="py-5 px-2 text-right">
                     <span className="text-[10px] font-black text-green-600 bg-green-50 px-2 py-1 rounded-lg uppercase">Net</span>
                   </td>
@@ -547,7 +540,7 @@ export default function Reports({ onNavigate }: ReportsProps) {
                 <tr className="text-sm group hover:bg-gray-50 transition-colors">
                   <td className="py-5 px-2 font-bold text-gray-700">Highest Sale Amount</td>
                   <td className="py-5 px-2 text-right font-black text-gray-900">
-                    ₹{sales.length > 0 ? Math.max(...sales.map(s => s.total_amount)).toLocaleString() : 0}
+                    {formatCurrency(sales.length > 0 ? Math.max(...sales.map(s => s.total_amount)) : 0)}
                   </td>
                   <td className="py-5 px-2 text-right">
                     <span className="text-[10px] font-black text-purple-600 bg-purple-50 px-2 py-1 rounded-lg uppercase">Peak</span>
@@ -556,7 +549,7 @@ export default function Reports({ onNavigate }: ReportsProps) {
                 <tr className="text-sm group hover:bg-gray-50 transition-colors">
                   <td className="py-5 px-2 font-bold text-gray-700">Average Sale Value</td>
                   <td className="py-5 px-2 text-right font-black text-gray-900">
-                    ₹{avgSaleValue.toLocaleString(undefined, {maximumFractionDigits: 0})}
+                    {formatCurrency(avgSaleValue)}
                   </td>
                   <td className="py-5 px-2 text-right">
                     <span className="text-[10px] font-black text-orange-600 bg-orange-50 px-2 py-1 rounded-lg uppercase">Average</span>
@@ -595,8 +588,8 @@ export default function Reports({ onNavigate }: ReportsProps) {
                     <td className="py-4 px-2 font-black text-gray-900">{formatDateToDDMMYYYY(day.date)}</td>
                     <td className="py-4 px-2 text-right font-bold text-gray-700">{day.transactions}</td>
                     <td className="py-4 px-2 text-right font-bold text-primary-700">{day.quantity}</td>
-                    <td className="py-4 px-2 text-right font-black text-blue-700">₹{day.revenue.toLocaleString('en-IN')}</td>
-                    <td className="py-4 px-2 text-right font-black text-green-700">₹{day.profit.toLocaleString('en-IN')}</td>
+                    <td className="py-4 px-2 text-right font-black text-blue-700">{formatCurrency(day.revenue)}</td>
+                    <td className="py-4 px-2 text-right font-black text-green-700">{formatCurrency(day.profit)}</td>
                   </tr>
                 ))}
                 {dailySalesTotals.length === 0 && (
@@ -610,6 +603,55 @@ export default function Reports({ onNavigate }: ReportsProps) {
             </table>
           </div>
         </div>
+
+        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+            <h3 className="text-lg font-black text-gray-900 flex items-center gap-2">
+              <ShoppingCart className="h-5 w-5 text-primary-600" />
+              Product-Wise Quantity Sold
+            </h3>
+            <div className="text-[10px] font-black text-gray-500 bg-gray-50 px-4 py-2 rounded-full border border-gray-100 uppercase tracking-widest">
+              {productSalesSummary.length} sold product{productSalesSummary.length === 1 ? '' : 's'}
+            </div>
+          </div>
+
+          <div className="overflow-x-auto max-h-[520px] overflow-y-auto">
+            <table className="w-full text-left">
+              <thead className="sticky top-0 bg-white z-10">
+                <tr className="text-gray-400 text-[10px] uppercase font-black border-b border-gray-100 tracking-tighter">
+                  <th className="pb-4 px-2">Product</th>
+                  <th className="pb-4 px-2 text-right">Qty Sold</th>
+                  <th className="pb-4 px-2 text-right">Orders</th>
+                  <th className="pb-4 px-2 text-right">Revenue</th>
+                  <th className="pb-4 px-2 text-right">Profit</th>
+                  <th className="pb-4 px-2 text-right">Current Stock</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {productSalesSummary.map(row => (
+                  <tr key={row.id} className="text-sm hover:bg-gray-50 transition-colors">
+                    <td className="py-4 px-2 font-black text-gray-900 uppercase">{row.name}</td>
+                    <td className="py-4 px-2 text-right font-black text-primary-700">{row.quantity}</td>
+                    <td className="py-4 px-2 text-right font-bold text-gray-700">{row.transactions}</td>
+                    <td className="py-4 px-2 text-right font-black text-blue-700">{formatCurrency(row.revenue)}</td>
+                    <td className="py-4 px-2 text-right font-black text-green-700">{formatCurrency(row.profit)}</td>
+                    <td className="py-4 px-2 text-right font-bold text-gray-700">
+                      {row.currentStock === null ? '-' : row.currentStock}
+                    </td>
+                  </tr>
+                ))}
+                {productSalesSummary.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-gray-400 font-bold italic">
+                      No product sales found for this date range.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         {/* Party-Wise Investment Summary */}
         <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
           <h3 className="text-lg font-black text-gray-900 mb-6 flex items-center gap-2">
@@ -620,7 +662,7 @@ export default function Reports({ onNavigate }: ReportsProps) {
             {partyInvestments.map(({ name, investment }) => (
               <div key={name} className="p-4 bg-gray-50 rounded-2xl border border-gray-100 hover:shadow-md transition-all">
                 <p className="text-xs font-black text-gray-400 uppercase tracking-widest mb-1">{name}</p>
-                <p className="text-xl font-black text-gray-900">₹{investment.toLocaleString('en-IN')}</p>
+                <p className="text-xl font-black text-gray-900">{formatCurrency(investment)}</p>
                 <div className="mt-2 w-full bg-gray-200 rounded-full h-1.5 overflow-hidden">
                   <div 
                     className="bg-primary-600 h-full transition-all duration-500" 
@@ -638,50 +680,6 @@ export default function Reports({ onNavigate }: ReportsProps) {
           </div>
         </div>
 
-        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-          <h3 className="text-lg font-black text-gray-900 mb-6 flex items-center gap-2">
-            <TrendingUp className="h-5 w-5 text-primary-600" />
-            Completed Party Purchase Profit/Loss
-          </h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="text-gray-400 text-[10px] uppercase font-black border-b border-gray-100">
-                  <th className="pb-4 px-2">Purchase</th>
-                  <th className="pb-4 px-2 text-right">Cost</th>
-                  <th className="pb-4 px-2 text-right">Transferred</th>
-                  <th className="pb-4 px-2 text-right">Sold</th>
-                  <th className="pb-4 px-2 text-right">Deducted</th>
-                  <th className="pb-4 px-2 text-right">Sold Amount</th>
-                  <th className="pb-4 px-2 text-right">Realized P/L</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {completedPartyPurchases.map(row => (
-                  <tr key={row.purchase.id} className="text-sm hover:bg-gray-50 transition-colors">
-                    <td className="py-4 px-2">
-                      <p className="font-black text-gray-900 uppercase">{row.purchase.item_name}</p>
-                      <p className="text-xs font-bold text-gray-400">{row.purchase.party_name}</p>
-                    </td>
-                    <td className="py-4 px-2 text-right font-black text-gray-900">â‚¹{row.purchaseCost.toLocaleString()}</td>
-                    <td className="py-4 px-2 text-right font-bold text-primary-700">{row.transferredQuantity}</td>
-                    <td className="py-4 px-2 text-right font-bold text-green-700">{row.soldQuantity}</td>
-                    <td className="py-4 px-2 text-right font-bold text-orange-700">{row.deductedQuantity}</td>
-                    <td className="py-4 px-2 text-right font-black text-blue-700">â‚¹{row.soldAmount.toLocaleString()}</td>
-                    <td className={`py-4 px-2 text-right font-black ${row.realizedProfitLoss >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                      â‚¹{row.realizedProfitLoss.toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-                {completedPartyPurchases.length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="py-8 text-center text-gray-400 font-bold italic">No completed party purchases yet.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
       </div>
     </div>
   );

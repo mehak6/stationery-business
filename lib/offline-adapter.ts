@@ -930,6 +930,33 @@ const fetchRemoteProduct = async (productId: string): Promise<Product | null> =>
   return data || null;
 };
 
+export const refreshProductFromSupabase = async (
+  productId: string,
+  fallbackStockQuantity?: number
+): Promise<Product | null> => {
+  if (isOnline) {
+    try {
+      const remoteProduct = await fetchRemoteProduct(productId);
+      if (remoteProduct) {
+        await OfflineDB.saveProduct(remoteProduct);
+        return remoteProduct;
+      }
+    } catch (error) {
+      console.warn('Could not force-refresh product from Supabase:', error);
+    }
+  }
+
+  if (typeof fallbackStockQuantity === 'number') {
+    const updatedProduct = await OfflineDB.updateProduct(productId, {
+      stock_quantity: fallbackStockQuantity,
+      updated_at: new Date().toISOString()
+    } as Partial<Product>);
+    return updatedProduct;
+  }
+
+  return await OfflineDB.getProductById(productId);
+};
+
 const createSaleWithoutRpc = async (sale: SaleInsert): Promise<Sale> => {
   const productBefore = await fetchRemoteProduct(sale.product_id);
   if (!productBefore) throw new Error('Product not found');

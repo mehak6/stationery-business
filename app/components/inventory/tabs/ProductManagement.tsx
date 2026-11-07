@@ -25,12 +25,14 @@ import {
   getClosingStockForYear,
   getSalesByProduct,
   getPartyPurchases,
+  getSalesByDateRange,
   adjustProductStock,
   type StockAdjustmentMode
 } from 'lib/offline-adapter';
 import { addProductHistory, getProductHistory, removeHistoryEntry } from 'lib/product-history';
-import { formatDateToDisplay, parseDisplayDate } from 'lib/date-utils';
-import type { Product, ProductInsert, PartyPurchase } from 'supabase_client';
+import { formatDateToDisplay, getFYRange, parseDisplayDate } from 'lib/date-utils';
+import { getCurrentDateISO } from '../utils/dateHelpers';
+import type { Product, ProductInsert, PartyPurchase, Sale } from 'supabase_client';
 import { useToast } from 'app/context/ToastContext';
 
 interface ProductManagementProps {
@@ -55,6 +57,7 @@ export default function ProductManagement({ onNavigate }: ProductManagementProps
   const [saving, setSaving] = useState(false);
   const [financialYear, setFinancialYear] = useState('2026-27');
   const [historicalStock, setHistoricalStock] = useState<Record<string, number>>({});
+  const [futureSales, setFutureSales] = useState<Sale[]>([]);
   const [isResetting, setIsResetting] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   
@@ -77,8 +80,13 @@ export default function ProductManagement({ onNavigate }: ProductManagementProps
     const fetchData = async () => {
       try {
         setLoading(true);
-        const productsData = await getProducts();
+        const range = getFYRange(financialYear);
+        const [productsData, salesData] = await Promise.all([
+          getProducts(),
+          getSalesByDateRange(range.start, range.end)
+        ]);
         setProducts(productsData || []);
+        setFutureSales((salesData || []).filter(sale => (sale.sale_date || '').split('T')[0] > getCurrentDateISO()));
 
         if (!isCurrentYear) {
           const closingData = await getClosingStockForYear(financialYear);
@@ -288,6 +296,8 @@ export default function ProductManagement({ onNavigate }: ProductManagementProps
     if (isCurrentYear) return product.stock_quantity;
     return historicalStock[product.id] ?? 0;
   };
+
+  const futureCommittedProductIds = new Set(futureSales.map(sale => sale.product_id));
 
   return (
     <div className="p-4 sm:p-6 bg-primary-50 min-h-screen">
@@ -537,25 +547,32 @@ export default function ProductManagement({ onNavigate }: ProductManagementProps
                     </div>
                     <div className="flex items-center gap-4 text-sm">
                       <span className="text-gray-500 sm:hidden">Stock: </span>
-                      {editingProduct === product.id && editingField === 'stock_quantity' ? (
-                        <input
-                          type="number"
-                          value={tempValue}
-                          onChange={(e) => setTempValue(e.target.value)}
-                          onKeyDown={(e) => handleKeyPress(e, product.id, 'stock_quantity')}
-                          className="w-16 px-2 py-1 border border-accent-300 rounded text-sm"
-                          autoFocus
-                        />
-                      ) : (
-                        <span
-                          className={`font-medium ${isCurrentYear ? 'cursor-pointer hover:bg-accent-50 px-2 py-1 rounded' : ''} ${
-                            stock <= product.min_stock_level ? 'text-red-600' : 'text-accent-700'
-                          }`}
-                          onClick={() => startEditing(product.id, 'stock_quantity', product.stock_quantity)}
-                        >
-                          {stock}
-                        </span>
-                      )}
+                      <div className="flex flex-col items-end gap-1 sm:items-start">
+                        {editingProduct === product.id && editingField === 'stock_quantity' ? (
+                          <input
+                            type="number"
+                            value={tempValue}
+                            onChange={(e) => setTempValue(e.target.value)}
+                            onKeyDown={(e) => handleKeyPress(e, product.id, 'stock_quantity')}
+                            className="w-16 px-2 py-1 border border-accent-300 rounded text-sm"
+                            autoFocus
+                          />
+                        ) : (
+                          <span
+                            className={`font-medium ${isCurrentYear ? 'cursor-pointer hover:bg-accent-50 px-2 py-1 rounded' : ''} ${
+                              stock <= product.min_stock_level ? 'text-red-600' : 'text-accent-700'
+                            }`}
+                            onClick={() => startEditing(product.id, 'stock_quantity', product.stock_quantity)}
+                          >
+                            {stock}
+                          </span>
+                        )}
+                        {isCurrentYear && futureCommittedProductIds.has(product.id) && (
+                          <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700">
+                            Includes future sales already deducted
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div className="flex gap-2 justify-end">
@@ -747,25 +764,32 @@ export default function ProductManagement({ onNavigate }: ProductManagementProps
 
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-gray-500">Stock:</span>
-                    {editingProduct === product.id && editingField === 'stock_quantity' ? (
-                      <input
-                        type="number"
-                        value={tempValue}
-                        onChange={(e) => setTempValue(e.target.value)}
-                        onKeyDown={(e) => handleKeyPress(e, product.id, 'stock_quantity')}
-                        className="w-16 px-2 py-1 border border-accent-300 rounded text-sm"
-                        autoFocus
-                      />
-                    ) : (
-                      <span 
-                        className={`font-medium ${isCurrentYear ? 'cursor-pointer px-2 py-1 rounded' : ''} ${
-                          stock <= product.min_stock_level ? 'text-red-600' : 'text-gray-900'
-                        }`}
-                        onClick={() => startEditing(product.id, 'stock_quantity', product.stock_quantity)}
-                      >
-                        {stock} units
-                      </span>
-                    )}
+                    <div className="flex flex-col items-end gap-1">
+                      {editingProduct === product.id && editingField === 'stock_quantity' ? (
+                        <input
+                          type="number"
+                          value={tempValue}
+                          onChange={(e) => setTempValue(e.target.value)}
+                          onKeyDown={(e) => handleKeyPress(e, product.id, 'stock_quantity')}
+                          className="w-16 px-2 py-1 border border-accent-300 rounded text-sm"
+                          autoFocus
+                        />
+                      ) : (
+                        <span
+                          className={`font-medium ${isCurrentYear ? 'cursor-pointer px-2 py-1 rounded' : ''} ${
+                            stock <= product.min_stock_level ? 'text-red-600' : 'text-gray-900'
+                          }`}
+                          onClick={() => startEditing(product.id, 'stock_quantity', product.stock_quantity)}
+                        >
+                          {stock} units
+                        </span>
+                      )}
+                      {isCurrentYear && futureCommittedProductIds.has(product.id) && (
+                        <span className="max-w-48 rounded-full bg-emerald-50 px-2 py-0.5 text-right text-[10px] font-black text-emerald-700">
+                          Includes future sales already deducted
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>

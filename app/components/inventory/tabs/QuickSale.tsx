@@ -20,7 +20,8 @@ import {
   adjustProductStock,
   markDamagedStock,
   createProduct,
-  getClosingStockForYear
+  getClosingStockForYear,
+  refreshProductFromSupabase
 } from 'lib/offline-adapter';
 import { 
   getFinancialYear, 
@@ -238,7 +239,48 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
     : filteredProducts;
   const cartTotal = cart.reduce((sum, item) => sum + (item.salePrice * item.quantity), 0);
   const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
-  const cartHasInsufficientStock = cart.some(item => item.quantity > item.product.stock_quantity);
+  const todayISO = getCurrentDateISO();
+  const futureCommittedProductIds = new Set(
+    popularSales
+      .filter(sale => (sale.sale_date || '').split('T')[0] > todayISO)
+      .map(sale => sale.product_id)
+  );
+
+  const getCartStockShortage = (items: CartItem[]) => {
+    const requiredByProduct = items.reduce<Record<string, { product: Product; quantity: number }>>((acc, item) => {
+      if (!acc[item.product.id]) {
+        acc[item.product.id] = { product: item.product, quantity: 0 };
+      }
+      acc[item.product.id].quantity += Number(item.quantity || 0);
+      return acc;
+    }, {});
+
+    return Object.values(requiredByProduct).find(entry => entry.quantity > Number(entry.product.stock_quantity || 0));
+  };
+
+  const cartStockShortage = getCartStockShortage(cart);
+  const cartHasInsufficientStock = Boolean(cartStockShortage);
+
+  const applyFreshProducts = (freshProducts: Product[]) => {
+    if (freshProducts.length === 0) return;
+    const freshById = new Map(freshProducts.map(product => [product.id, product]));
+
+    setProducts(prev => prev.map(product => freshById.get(product.id) || product));
+    setCart(prev => prev.map(item => {
+      const freshProduct = freshById.get(item.product.id);
+      return freshProduct ? { ...item, product: freshProduct } : item;
+    }));
+  };
+
+  const refreshProductsById = async (productIds: string[]) => {
+    const uniqueProductIds = Array.from(new Set(productIds));
+    const freshProducts = (await Promise.all(
+      uniqueProductIds.map(productId => refreshProductFromSupabase(productId).catch(() => null))
+    )).filter(Boolean) as Product[];
+
+    applyFreshProducts(freshProducts);
+    return freshProducts;
+  };
 
   const getStockBadge = (product: Product) => {
     const stock = getDisplayStock(product);
@@ -329,16 +371,28 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
   const handleCompleteSale = async () => {
     if (cart.length === 0 || processing) return;
 
-    const insufficientStock = cart.find(item => item.quantity > item.product.stock_quantity);
-    if (insufficientStock) {
-      showToast(`Insufficient stock for ${insufficientStock.product.name}`, 'error');
-      return;
-    }
-
     try {
       setProcessing(true);
+      const freshProducts = await refreshProductsById(cart.map(item => item.product.id));
+      const freshProductMap = new Map(freshProducts.map(product => [product.id, product]));
+      const freshCart = cart.map(item => ({
+        ...item,
+        product: freshProductMap.get(item.product.id) || item.product
+      }));
+
+      const insufficientStock = getCartStockShortage(freshCart);
+      if (insufficientStock) {
+        showToast(
+          `Insufficient stock for ${insufficientStock.product.name}. Available: ${insufficientStock.product.stock_quantity}, Requested: ${insufficientStock.quantity}`,
+          'error'
+        );
+        return;
+      }
+
       const completedSales: Sale[] = [];
-      for (const item of cart) {
+      const affectedProductIds = new Set<string>();
+
+      for (const item of freshCart) {
         const totalAmount = item.salePrice * item.quantity;
         const profit = (item.salePrice - item.product.purchase_price) * item.quantity;
 
@@ -354,13 +408,10 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
         // This call now handles stock update atomically (via RPC/Trigger online or offline-db logic)
         const createdSale = await createSale(saleData);
         completedSales.push(createdSale);
-
-        // Update local products state for immediate UI feedback
-        const newStockQuantity = item.product.stock_quantity - item.quantity;
-        setProducts(prev => prev.map(p => 
-          p.id === item.product.id ? { ...p, stock_quantity: newStockQuantity } : p
-        ));
+        affectedProductIds.add(item.product.id);
       }
+
+      await refreshProductsById(Array.from(affectedProductIds));
 
       const updatedSalesData = await getSalesByDate(saleDate);
       const uniqueProducts = new Set((updatedSalesData || []).map(sale => sale.product_id));
@@ -375,7 +426,7 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
       showToast('Sale completed successfully!', 'success');
     } catch (error) {
       console.error('Error processing sale:', error);
-      showToast('Error processing sale', 'error');
+      showToast(error instanceof Error ? error.message : 'Error processing sale', 'error');
     } finally {
       setProcessing(false);
     }
@@ -396,8 +447,7 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
         date: customDate
       });
 
-      setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
-      setCart(prev => prev.map(item => item.product.id === updatedProduct.id ? { ...item, product: { ...item.product, stock_quantity: updatedProduct.stock_quantity } } : item));
+      applyFreshProducts([updatedProduct]);
       setShowAddStockModal(false);
       setAddStockReason('Stock added during quick sale');
       showToast('Stock added successfully', 'success');
@@ -425,14 +475,7 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
         damageDate
       );
 
-      setProducts(prev => prev.map(p =>
-        p.id === updatedProduct.id ? { ...p, stock_quantity: updatedProduct.stock_quantity } : p
-      ));
-      setCart(prev => prev.map(item =>
-        item.product.id === updatedProduct.id
-          ? { ...item, product: { ...item.product, stock_quantity: updatedProduct.stock_quantity } }
-          : item
-      ));
+      applyFreshProducts([updatedProduct]);
       setShowDamageModal(false);
       setDamageProduct(null);
       showToast(`Removed ${damageQuantity} damaged unit${damageQuantity === 1 ? '' : 's'} from stock`, 'success');
@@ -589,8 +632,13 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
                             <span className={`h-1.5 w-1.5 rounded-full ${stockBadge.dotClassName}`} />
                             {stockBadge.label}
                           </span>
-                          <span className="text-xs font-black text-gray-400">{displayStock} left</span>
+                          <span className="text-xs font-black text-gray-400">Stock: {displayStock}</span>
                         </div>
+                        {isCurrentYear && futureCommittedProductIds.has(product.id) && (
+                          <div className="mb-2 rounded-lg bg-emerald-50 px-2 py-1 text-[10px] font-black text-emerald-700">
+                            Includes future sales already deducted
+                          </div>
+                        )}
                         {isShowingMostlyUsed && usageStats && (
                           <div className="mb-2 inline-flex rounded-full bg-blue-50 px-2 py-1 text-[10px] font-black uppercase text-blue-700">
                             {usageStats.quantity} sold
@@ -673,6 +721,11 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
                         <p className="truncate font-black text-gray-950">{item.product.name}</p>
                         <div className="mt-1 flex flex-wrap items-center gap-2">
                           <span className="text-xs font-bold text-gray-500">Stock: {item.product.stock_quantity}</span>
+                          {futureCommittedProductIds.has(item.product.id) && (
+                            <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700">
+                              Includes future sales already deducted
+                            </span>
+                          )}
                           {item.product.stock_quantity > 0 && (
                             <button
                               type="button"
@@ -769,7 +822,8 @@ export default function QuickSale({ onNavigate }: QuickSaleProps) {
             </div>
             {cartHasInsufficientStock && (
               <div className="mb-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-700">
-                Resolve stock shortage before checkout.
+                Resolve stock shortage before checkout
+                {cartStockShortage ? `: ${cartStockShortage.product.name} needs ${cartStockShortage.quantity}, available ${cartStockShortage.product.stock_quantity}.` : '.'}
               </div>
             )}
             <button

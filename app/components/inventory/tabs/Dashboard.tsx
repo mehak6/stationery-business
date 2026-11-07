@@ -13,7 +13,9 @@ import {
   X,
   RefreshCw,
   Download,
-  Database
+  Database,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import {
   getProducts,
@@ -62,6 +64,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   });
 
   const [lowStockItems, setLowStockItems] = useState<Product[]>([]);
+  const [lowStockCollapsed, setLowStockCollapsed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [allSales, setAllSales] = useState<Sale[]>([]);
   const [showAllSales, setShowAllSales] = useState(false);
@@ -72,6 +75,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   const [endDateDisplay, setEndDateDisplay] = useState(getCurrentDateDisplay());
   const [allSalesPage, setAllSalesPage] = useState(1);
   const [allSalesTotal, setAllSalesTotal] = useState(0);
+  const [allSalesTotalPages, setAllSalesTotalPages] = useState(1);
   const SALES_PER_PAGE = 20;
 
   type ExtendedSale = Sale & { 
@@ -170,6 +174,39 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       }
       return next;
     });
+  };
+
+  const getSaleDateKey = (sale: Sale) => (sale.sale_date || '').split('T')[0] || 'unknown-date';
+
+  const getDatePagedSales = (sortedSales: Sale[], page: number) => {
+    const dateGroups = sortedSales.reduce<Array<{ dateKey: string; sales: Sale[] }>>((groups, sale) => {
+      const dateKey = getSaleDateKey(sale);
+      const lastGroup = groups[groups.length - 1];
+      if (lastGroup?.dateKey === dateKey) {
+        lastGroup.sales.push(sale);
+      } else {
+        groups.push({ dateKey, sales: [sale] });
+      }
+      return groups;
+    }, []);
+
+    const pages = dateGroups.reduce<Sale[][]>((acc, group) => {
+      const currentPage = acc[acc.length - 1];
+      const currentCount = currentPage?.length || 0;
+
+      if (!currentPage || currentCount === 0 || currentCount + group.sales.length > SALES_PER_PAGE) {
+        acc.push([...group.sales]);
+      } else {
+        currentPage.push(...group.sales);
+      }
+
+      return acc;
+    }, []);
+
+    return {
+      pageSales: pages[Math.max(0, Math.min(page - 1, pages.length - 1))] || [],
+      totalPages: Math.max(1, pages.length)
+    };
   };
 
   const handleSyncAndRefresh = async () => {
@@ -353,13 +390,19 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       });
 
       setAllSalesTotal(sortedData.length);
-      const from = (page - 1) * SALES_PER_PAGE;
-      const paginatedData = sortedData.slice(from, from + SALES_PER_PAGE);
+      const { pageSales, totalPages } = getDatePagedSales(sortedData, page);
+      const safePage = Math.min(page, totalPages);
 
-      setAllSales(paginatedData);
+      if (safePage !== page) {
+        setAllSalesPage(safePage);
+      }
+      setAllSalesTotalPages(totalPages);
+      setAllSales(pageSales);
     } catch (error) {
       console.error('Error fetching sales:', error);
       setAllSales([]);
+      setAllSalesTotal(0);
+      setAllSalesTotalPages(1);
     } finally {
       setAllSalesLoading(false);
     }
@@ -518,45 +561,62 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       {/* Low Stock Alerts */}
       {lowStockItems.length > 0 && (
         <div className="card bg-gradient-to-br from-orange-50 to-red-50 border-2 border-orange-200 mb-8">
-          <div className="flex items-center justify-between mb-4">
+          <div className={`flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between ${lowStockCollapsed ? '' : 'mb-4'}`}>
             <div className="flex items-center gap-2">
               <AlertTriangle className="h-6 w-6 text-orange-600" />
               <h3 className="text-lg font-semibold text-gray-900">Low Stock Alerts</h3>
               <span className="bg-orange-600 text-white text-xs px-2 py-1 rounded-full font-bold">{lowStockItems.length}</span>
             </div>
-            <button
-              onClick={() => onNavigate('products')}
-              className="text-sm font-bold text-orange-700 bg-white px-4 py-2 rounded-lg border border-orange-200 hover:bg-orange-100 transition-colors"
-            >
-              Manage Stock
-            </button>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {lowStockItems.map(product => (
-              <div
-                key={product.id}
-                className="bg-white rounded-xl p-3 border-2 border-orange-200 shadow-sm hover:shadow-md transition-all cursor-pointer"
-                onClick={() => onNavigate('products')}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setLowStockCollapsed(prev => !prev)}
+                className="inline-flex items-center gap-2 text-sm font-bold text-orange-700 bg-white px-4 py-2 rounded-lg border border-orange-200 hover:bg-orange-100 transition-colors"
+                aria-expanded={!lowStockCollapsed}
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <p className="font-bold text-gray-900 text-sm truncate">{product.name}</p>
-                    <p className="text-xs text-gray-500 font-medium">Min: {product.min_stock_level}</p>
-                  </div>
-                  <div className="text-right ml-2">
-                    <p className="font-black text-red-600 text-lg leading-none">{product.stock_quantity}</p>
-                    <p className="text-[10px] uppercase font-bold text-gray-400">units</p>
-                  </div>
-                </div>
-                <div className="mt-2 bg-orange-100 rounded-full h-2 overflow-hidden">
-                  <div
-                    className="bg-red-500 h-full transition-all"
-                    style={{ width: `${Math.max(5, Math.min(100, (product.stock_quantity / product.min_stock_level) * 100))}%` }}
-                  />
-                </div>
-              </div>
-            ))}
+                {lowStockCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+                {lowStockCollapsed ? 'Expand' : 'Collapse All'}
+              </button>
+              <button
+                onClick={() => onNavigate('products')}
+                className="text-sm font-bold text-orange-700 bg-white px-4 py-2 rounded-lg border border-orange-200 hover:bg-orange-100 transition-colors"
+              >
+                Manage Stock
+              </button>
+            </div>
           </div>
+          {lowStockCollapsed ? (
+            <p className="mt-3 text-sm font-semibold text-orange-700">
+              {lowStockItems.length} product{lowStockItems.length === 1 ? '' : 's'} need stock attention.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {lowStockItems.map(product => (
+                <div
+                  key={product.id}
+                  className="bg-white rounded-xl p-3 border-2 border-orange-200 shadow-sm hover:shadow-md transition-all cursor-pointer"
+                  onClick={() => onNavigate('products')}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <p className="font-bold text-gray-900 text-sm truncate">{product.name}</p>
+                      <p className="text-xs text-gray-500 font-medium">Min: {product.min_stock_level}</p>
+                    </div>
+                    <div className="text-right ml-2">
+                      <p className="font-black text-red-600 text-lg leading-none">{product.stock_quantity}</p>
+                      <p className="text-[10px] uppercase font-bold text-gray-400">units</p>
+                    </div>
+                  </div>
+                  <div className="mt-2 bg-orange-100 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-red-500 h-full transition-all"
+                      style={{ width: `${Math.max(5, Math.min(100, (product.stock_quantity / product.min_stock_level) * 100))}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -734,7 +794,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
                       })()}
                     </div>
 
-                    {allSalesTotal > SALES_PER_PAGE && (
+                    {allSalesTotalPages > 1 && (
                       <div className="flex justify-center gap-3 mt-8">
                         <button
                           onClick={() => handlePageChange(Math.max(1, allSalesPage - 1))}
@@ -744,11 +804,11 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
                           Previous
                         </button>
                         <div className="flex items-center bg-primary-100 px-4 py-2 rounded-xl font-black text-primary-700">
-                          Page {allSalesPage} / {Math.ceil(allSalesTotal / SALES_PER_PAGE)}
+                          Page {allSalesPage} / {allSalesTotalPages}
                         </div>
                         <button
                           onClick={() => handlePageChange(allSalesPage + 1)}
-                          disabled={allSalesPage * SALES_PER_PAGE >= allSalesTotal}
+                          disabled={allSalesPage >= allSalesTotalPages}
                           className="bg-white border-2 border-gray-200 text-gray-600 px-6 py-2 rounded-xl font-bold hover:bg-gray-50 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
                         >
                           Next
