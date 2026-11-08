@@ -114,18 +114,7 @@ const withPWA = require('@ducanh2912/next-pwa').default({
       },
       {
         urlPattern: /^https:\/\/ccpvnpidhxkcbxeeyqeq\.supabase\.co\/.*/i,
-        handler: 'NetworkFirst',
-        options: {
-          cacheName: 'supabase-assets',
-          networkTimeoutSeconds: 10,
-          expiration: {
-            maxEntries: 16,
-            maxAgeSeconds: 60 * 60 * 24 // 24 hours
-          },
-          cacheableResponse: {
-            statuses: [0, 200]
-          }
-        }
+        handler: 'NetworkOnly'
       },
       {
         urlPattern: /\.(?:pdf)$/i,
