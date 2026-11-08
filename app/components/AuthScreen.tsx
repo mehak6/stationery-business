@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Lock, Mail, Eye, EyeOff, LogIn, UserPlus, AlertCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import PhoneLogin from './PhoneLogin';
 
 export default function AuthScreen() {
   const { signIn, signUp } = useAuth();
@@ -209,6 +210,7 @@ export default function AuthScreen() {
             </button>
           </div>
 
+          {process.env.NEXT_PUBLIC_PHONE_LOGIN_ENABLED === 'true' && <PhoneLogin />}
           {/* Footer */}
           <div className="mt-6 text-center">
             <p className="text-xs text-gray-500">

@@ -3,6 +3,10 @@ import { useProducts } from '../hooks/useProducts';
 import { useSales } from '../hooks/useSales';
 import { usePartyPurchases } from '../hooks/usePartyPurchases';
 
+// These are offline CRUD tests: never start background network synchronization.
+jest.mock('../hooks/useSyncStatus', () => ({ useSyncStatus: () => ({ syncStatus: 'idle' }) }));
+beforeAll(() => window.dispatchEvent(new Event('offline')));
+
 // Mock the offline-db to avoid real IndexedDB usage during tests
 jest.mock('../lib/offline-db', () => ({
   getAllProducts: jest.fn().mockResolvedValue([]),
