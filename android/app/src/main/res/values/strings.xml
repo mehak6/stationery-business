@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Bol Bahi Inventory</string>
-    <string name="title_activity_main">Bol Bahi Inventory</string>
-    <string name="package_name">com.mehak.stationery</string>
-    <string name="custom_url_scheme">com.mehak.stationery</string>
+    <string name="app_name">Bol Bahi</string>
+    <string name="title_activity_main">Bol Bahi</string>
+    <string name="package_name">com.mehak.bolbahi</string>
+    <string name="custom_url_scheme">com.mehak.bolbahi</string>
 </resources>

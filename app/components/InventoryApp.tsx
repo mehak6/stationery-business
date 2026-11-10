@@ -80,6 +80,7 @@ function InventoryApp() {
       window.history.pushState({ view }, '', `#${view}`);
       setCurrentView(view);
       setMobileMenuOpen(false);
+      window.scrollTo({ top: 0, behavior: 'instant' });
     }
   };
 

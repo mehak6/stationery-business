@@ -20,11 +20,13 @@ jest.mock('../app/components/inventory/tabs/Reports', () => () => <div>Reports c
 
 it('restores the tab from Android/browser back without pushing a replacement history entry', () => {
   window.history.replaceState({}, '', '/#dashboard');
+  window.scrollTo = jest.fn();
   const push = jest.spyOn(window.history, 'pushState');
   render(<InventoryApp />);
-  fireEvent.click(screen.getByRole('button', { name: 'Products', exact: true }));
+  fireEvent.click(screen.getByRole('button', { name: 'Products' }));
   expect(screen.getByText('Products content')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Reports', exact: true }));
+  expect(window.scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'instant' });
+  fireEvent.click(screen.getByRole('button', { name: 'Reports' }));
   expect(screen.getByText('Reports content')).toBeInTheDocument();
   const pushesBeforeBack = push.mock.calls.length;
   act(() => {

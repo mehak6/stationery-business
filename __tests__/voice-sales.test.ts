@@ -7,3 +7,12 @@ describe('voice draft review',()=>{
  it('does not match an alias inside another product word',()=>{expect(parseVoiceSale('two blue pencil',products)[0].product_id).toBe('')});
  it('uses integer paise in draft totals',()=>{expect(saleTotal([{product_id:'pen',quantity:3,unit_price:0.1}])).toBe(0.3)});
 });
+describe('bilingual catalogue matching',()=>{
+ const catalogue=[{id:'pencil',name:'PENCIL',selling_price:20,voice_aliases:[]},{id:'pen',name:'PENS',selling_price:10,voice_aliases:[]},{id:'red',name:'RED PEN',selling_price:15,voice_aliases:[]}];
+ it('recognises the exact phrase spoken on the S24',()=>expect(parseVoiceSale('दो पेंसिल',catalogue)[0]).toMatchObject({product_id:'pencil',quantity:2,unit_price:20}));
+ it('recognises Hinglish and plural English names',()=>expect(parseVoiceSale('do pensil and three pens',catalogue)).toMatchObject([{product_id:'pencil',quantity:2},{product_id:'pen',quantity:3}]));
+ it('does not silently ignore a colour qualifier',()=>expect(parseVoiceSale('दो नीले पेन',catalogue)[0]).toMatchObject({product_id:'',quantity:2}));
+ it('matches a specific colour when the exact item exists',()=>expect(parseVoiceSale('तीन लाल पेन',catalogue)[0]).toMatchObject({product_id:'red',quantity:3}));
+ it('asks for selection when the catalogue has only variants',()=>{const p=[{...catalogue[0],id:'a',name:'PENCIL HB'},{...catalogue[0],id:'b',name:'PENCIL 2B'}];expect(parseVoiceSale('दो पेंसिल',p)[0]).toMatchObject({product_id:'',quantity:2,suggested_ids:expect.arrayContaining(['a','b'])})});
+ it('does not auto-select duplicate exact names',()=>expect(parseVoiceSale('दो पेंसिल',[catalogue[0],{...catalogue[0],id:'other'}])[0].product_id).toBe(''));
+});
