@@ -45,3 +45,9 @@ Legacy full Inventory Pro tools remain available on the web admin route and the 
 ## Voice matching
 
 Common Hindi/Hinglish product words are normalised against catalogue names and configured voice aliases. `दो पेंसिल` matches a unique `PENCIL` item and quantity 2. Duplicate names and variants stay unselected with suggestions. Brand, colour, spoken rates and pack conversions must not be silently discarded. Staff can search in Hindi or English and correct the draft before saving.
+
+Version 1.2 adds Hindi labels in the Android stock screen and sales picker, plus an admin **Hindi names** tab with search and pagination. The first Hindi voice alias is the display label; the original inventory name remains alongside it. `lib/hindi-product-names.json` covers all 132 catalogue rows checked during this release. Their Hindi aliases were also saved to the existing `products.voice_aliases` field. New inventory products can receive spoken names through the admin editor.
+
+Unpunctuated orders such as `दो पेंसिल तीन पेन एक रबड़` split into separate draft rows only when there is a unique exact segmentation. Conjunctions inside a full product name are preserved. Unknown clauses and duplicate names still require correction. Price-specific aliases such as `तीस वाली डायरी` identify the variant without treating 30 as the quantity.
+
+Release validation: 51 automated tests, TypeScript check, static Android build, and debug APK build passed. On the S24, an unsaved typed order with three products produced quantities 2/3/1 and the correct Hindi product selections. No live sale was saved. Live spoken recognition should still be checked by the operator. Of 132 catalogue names, 126 matched uniquely; the six rows for duplicate CAR, DIARY @60 and SPINNER @100 names intentionally require selection.

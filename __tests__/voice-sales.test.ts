@@ -1,4 +1,5 @@
 import {parseVoiceSale,saleTotal} from '../lib/voice-sales';
+import {hindiName,suggestedHindiAliases} from '../lib/hindi-products';
 const products=[{id:'pen',name:'Blue pen',voice_aliases:['नीले पेन'],selling_price:10.25},{id:'book',name:'Classmate 200',voice_aliases:['कॉपी'],selling_price:50}];
 describe('voice draft review',()=>{
  it('matches Hindi quantities without using the numeric product variant as quantity',()=>{expect(parseVoiceSale('दो नीले पेन और तीन Classmate 200',products)).toMatchObject([{product_id:'pen',quantity:2},{product_id:'book',quantity:3}])});
@@ -6,6 +7,17 @@ describe('voice draft review',()=>{
  it('leaves pack and spoken price interpretations for manual review',()=>{for(const text of ['दो बॉक्स नीले पेन','नीले पेन','दो नीले पेन दस रुपये'])expect(parseVoiceSale(text,products)[0].quantity).toBe(0)});
  it('does not match an alias inside another product word',()=>{expect(parseVoiceSale('two blue pencil',products)[0].product_id).toBe('')});
  it('uses integer paise in draft totals',()=>{expect(saleTotal([{product_id:'pen',quantity:3,unit_price:0.1}])).toBe(0.3)});
+});
+describe('multiple products in a spoken order',()=>{
+ const p=[{id:'pencil',name:'PENCIL',selling_price:10,voice_aliases:[]},{id:'pen',name:'PENS',selling_price:20,voice_aliases:[]},{id:'eraser',name:'ERASER',selling_price:5,voice_aliases:[]},{id:'diary',name:'DIARY @30',selling_price:30,voice_aliases:[]},{id:'set',name:'PEN & DIARY ',selling_price:90,voice_aliases:[]}];
+ it.each(['दो पेंसिल तीन पेन एक रबड़','दो पेंसिल और तीन पेन और एक रबड़','दो पेंसिल, तीन पेन; एक रबड़','दो पेंसिल फिर तीन पेन प्लस एक रबड़','पेंसिल दो पेन तीन रबड़ एक'])('creates separate rows: %s',text=>expect(parseVoiceSale(text,p)).toMatchObject([{product_id:'pencil',quantity:2},{product_id:'pen',quantity:3},{product_id:'eraser',quantity:1}]));
+ it('keeps quantity distinct from a spoken price variant',()=>expect(parseVoiceSale('दो तीस वाली डायरी तीन पेंसिल',p)).toMatchObject([{product_id:'diary',quantity:2},{product_id:'pencil',quantity:3}]));
+ it('protects conjunctions inside a product name',()=>expect(parseVoiceSale('दो पेन और डायरी सेट और तीन पेंसिल',p)).toMatchObject([{product_id:'set',quantity:2},{product_id:'pencil',quantity:3}]));
+ it('retains unknown clauses for correction',()=>expect(parseVoiceSale('दो पेंसिल और तीन अनजान सामान और एक रबड़',p)).toMatchObject([{product_id:'pencil',quantity:2},{product_id:'',quantity:3},{product_id:'eraser',quantity:1}]));
+ it('does not lose an unknown word in an unpunctuated order',()=>expect(parseVoiceSale('दो पेंसिल तीन अनजान सामान',p)).toMatchObject([{product_id:'',quantity:0}]));
+ it('does not choose duplicate Hindi names',()=>expect(parseVoiceSale('दो तीस वाली डायरी',[...p,{...p[3],id:'duplicate'}])[0].product_id).toBe(''));
+ it('retains both identical products in an order',()=>expect(parseVoiceSale('दो पेंसिल तीन पेंसिल',p)).toMatchObject([{product_id:'pencil',quantity:2},{product_id:'pencil',quantity:3}]));
+ it('provides Hindi labels and price-specific aliases',()=>{expect(hindiName(p[0])).toBe('पेंसिल');expect(suggestedHindiAliases('DIARY @30')).toContain('30 वाली डायरी')});
 });
 describe('bilingual catalogue matching',()=>{
  const catalogue=[{id:'pencil',name:'PENCIL',selling_price:20,voice_aliases:[]},{id:'pen',name:'PENS',selling_price:10,voice_aliases:[]},{id:'red',name:'RED PEN',selling_price:15,voice_aliases:[]}];
