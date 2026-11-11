@@ -48,14 +48,18 @@ export function parseVoiceSale(text: string, products: SalesProduct[]): SalesLin
   })).sort((a,b) => b.name.length-a.name.length);
   const best = candidates[0];
   const exact = best && new Set(candidates.filter(c => c.name.length===best.name.length).map(c=>c.p.id)).size===1 ? best : undefined;
-  const rest = exact?.rest || clause;
+  // A duplicate catalogue name still identifies which number is the quantity.
+  // Leave the product unselected, but do not mistake its price/size for a quantity.
+  const top=candidates.filter(c=>c.name.length===best?.name.length);
+  const rest = exact?.rest || (top.length && new Set(top.map(c=>c.rest)).size===1 ? top[0].rest : clause);
   const quantities = rest.split(' ').map(quantity).filter((v): v is number => v!==null);
   const ambiguous = quantities.length!==1 || /रुप|₹|rate|discount|डिस्काउंट|परसेंट|percent|box|बॉक्स|dozen|दर्जन|packet|पैकेट/.test(rest);
   return {product_id:exact?.p.id||'', quantity:ambiguous?0:quantities[0], unit_price:exact?.p.selling_price||0, heard,
    suggested_ids: exact ? [] : productSuggestions(heard, products).map(p=>p.id)};
  }
  // First recognise complete catalogue names, including names containing 'and/और'.
- // Only split an unpunctuated phrase when every segment is an exact, unique item.
+ // Prefer exact segmentation. If a name is unclear, quantity boundaries can still
+ // preserve separate rows; matching a product and detecting its count are separate.
  function segment(heard:string):SalesLine[]{
   const whole=parseLine(heard);
   if(whole.product_id && whole.quantity>0)return [whole];
@@ -74,7 +78,26 @@ export function parseVoiceSale(text: string, products: SalesProduct[]): SalesLin
    }
    memo.set(start,found);return found;
   }
-  const possible=paths(0);return possible.length===1?possible[0]:[whole];
+  const possible=paths(0);if(possible.length===1)return possible[0];
+  if(possible.length>1 || words.some(w=>/^(और|and|फिर|plus|प्लस)$/i.test(w)))return [whole];
+  const canonical=words.map(w=>productWords(w));
+  // A numeric size or price inside a known name must never become a new item.
+  const nameNumbers=new Set<number>();
+  for(let start=0;start<words.length;start++)for(let end=start+1;end<=words.length;end++){
+   const phrase=canonical.slice(start,end).join(' ');
+   if(namedProducts.some(p=>p.names.includes(phrase)))for(let i=start;i<end;i++)if(quantity(canonical[i])!==null)nameNumbers.add(i);
+  }
+  const counts=canonical.flatMap((w,i)=>quantity(w)!==null&&!nameNumbers.has(i)?[i]:[]);
+  if(counts.length<2)return [whole];
+  const prefix=counts[0]===0;
+  const boundaries:number[]=[0];
+  if(prefix)boundaries.push(...counts.slice(1));
+  else for(const i of counts){let end=i+1;while(end<words.length&&filler.has(canonical[end]))end++;boundaries.push(end);}
+  if(boundaries[boundaries.length-1]!==words.length)boundaries.push(words.length);
+  const separated=boundaries.slice(0,-1).map((start,i)=>parseLine(words.slice(start,boundaries[i+1]).join(' ')));
+  // Keep unknown product words for manual selection. Never discard prices, packs,
+  // leftover words or a fragment that consists only of a number/unit.
+  return separated.length>1 && separated.every(l=>l.quantity>0 && productWords(l.heard||'').split(' ').some(w=>quantity(w)===null&&!filler.has(w))) ? separated : [whole];
  }
  return text.split(/[,\n।;]+/).filter(c=>c.trim()).flatMap(chunk=>{
   const whole=segment(chunk);if(whole.every(l=>l.product_id&&l.quantity>0))return whole;

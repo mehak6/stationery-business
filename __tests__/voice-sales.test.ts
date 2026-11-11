@@ -14,10 +14,19 @@ describe('multiple products in a spoken order',()=>{
  it('keeps quantity distinct from a spoken price variant',()=>expect(parseVoiceSale('दो तीस वाली डायरी तीन पेंसिल',p)).toMatchObject([{product_id:'diary',quantity:2},{product_id:'pencil',quantity:3}]));
  it('protects conjunctions inside a product name',()=>expect(parseVoiceSale('दो पेन और डायरी सेट और तीन पेंसिल',p)).toMatchObject([{product_id:'set',quantity:2},{product_id:'pencil',quantity:3}]));
  it('retains unknown clauses for correction',()=>expect(parseVoiceSale('दो पेंसिल और तीन अनजान सामान और एक रबड़',p)).toMatchObject([{product_id:'pencil',quantity:2},{product_id:'',quantity:3},{product_id:'eraser',quantity:1}]));
- it('does not lose an unknown word in an unpunctuated order',()=>expect(parseVoiceSale('दो पेंसिल तीन अनजान सामान',p)).toMatchObject([{product_id:'',quantity:0}]));
+ it('keeps an unknown product as a separate row with its quantity',()=>expect(parseVoiceSale('दो पेंसिल तीन अनजान सामान',p)).toMatchObject([{product_id:'pencil',quantity:2},{product_id:'',quantity:3,heard:'तीन अनजान सामान'}]));
  it('does not choose duplicate Hindi names',()=>expect(parseVoiceSale('दो तीस वाली डायरी',[...p,{...p[3],id:'duplicate'}])[0].product_id).toBe(''));
  it('retains both identical products in an order',()=>expect(parseVoiceSale('दो पेंसिल तीन पेंसिल',p)).toMatchObject([{product_id:'pencil',quantity:2},{product_id:'pencil',quantity:3}]));
  it('provides Hindi labels and price-specific aliases',()=>{expect(hindiName(p[0])).toBe('पेंसिल');expect(suggestedHindiAliases('DIARY @30')).toContain('30 वाली डायरी')});
+});
+describe('uncertain products keep their own quantities',()=>{
+ const p=[{id:'clay',name:'BELAN CLAY',voice_aliases:[],selling_price:100},{id:'pen',name:'PENS',voice_aliases:[],selling_price:20},{id:'diary1',name:'DIARY @60',voice_aliases:[],selling_price:60},{id:'diary2',name:'DIARY @60 ',voice_aliases:[],selling_price:60}];
+ it('reproduces the exact phone transcript as two rows',()=>expect(parseVoiceSale('बेलन के लिए एक पीस पेन दो पीस',p)).toMatchObject([{product_id:'',quantity:1,heard:'बेलन के लिए एक पीस',suggested_ids:['clay']},{product_id:'pen',quantity:2,heard:'पेन दो पीस'}]));
+ it.each(['बेलन एक पेन दो','एक बेलन दो पेन','एक पीस बेलन दो पीस पेन'])('splits an uncertain name: %s',text=>expect(parseVoiceSale(text,p)).toMatchObject([{product_id:'',quantity:1},{product_id:'pen',quantity:2}]));
+ it('retains a duplicate numeric product count',()=>expect(parseVoiceSale('दो डायरी 60',p)).toMatchObject([{product_id:'',quantity:2}]));
+ it('keeps the second item when the first name is duplicated',()=>expect(parseVoiceSale('दो डायरी 60 तीन पेन',p)).toMatchObject([{product_id:'',quantity:2},{product_id:'pen',quantity:3}]));
+ it('does not turn a price into an item or drop it',()=>expect(parseVoiceSale('दो पेन दस रुपये',p)).toMatchObject([{product_id:'',quantity:0}]));
+ it('does not drop a trailing unknown word',()=>expect(parseVoiceSale('बेलन एक पेन दो बाकी',p)).toHaveLength(1));
 });
 describe('bilingual catalogue matching',()=>{
  const catalogue=[{id:'pencil',name:'PENCIL',selling_price:20,voice_aliases:[]},{id:'pen',name:'PENS',selling_price:10,voice_aliases:[]},{id:'red',name:'RED PEN',selling_price:15,voice_aliases:[]}];

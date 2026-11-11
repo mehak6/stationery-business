@@ -1,0 +1,27 @@
+import React from 'react';
+import {render,screen,fireEvent,waitFor} from '@testing-library/react';
+import '@testing-library/jest-dom';
+import VoiceSales from '../app/components/VoiceSales';
+import {supabase} from '../supabase_client';
+jest.mock('../app/context/AuthContext',()=>({useAuth:()=>({role:'salesperson',signOut:jest.fn()})}));
+jest.mock('../supabase_client',()=>({supabase:{rpc:jest.fn()}}));
+jest.mock('../lib/native-speech',()=>({isNativeAndroid:()=>false,nativeSpeechAvailable:jest.fn(),captureNativeSpeech:jest.fn(),stopNativeSpeech:jest.fn()}));
+it('choosing the unclear first product preserves its count and the second row',async()=>{
+ const products=[{id:'clay',name:'BELAN CLAY',voice_aliases:[],selling_price:100},{id:'pen',name:'PENS',voice_aliases:[],selling_price:20}];
+ (supabase.rpc as jest.Mock).mockImplementation(async(name:string)=>({data:name==='staff_catalogue'?products:{receipts:[],total:0,date:'2026-11-11'},error:null}));
+ render(<VoiceSales/>);
+ await waitFor(()=>expect(screen.getByRole('button',{name:'Add item'})).toBeEnabled());
+ fireEvent.change(screen.getByLabelText('Spoken or typed order'),{target:{value:'बेलन के लिए एक पीस पेन दो पीस'}});
+ fireEvent.click(screen.getByRole('button',{name:'Prepare draft'}));
+ expect(screen.getAllByRole('combobox')).toHaveLength(2);
+ expect(screen.getByLabelText('Quantity 1')).toHaveValue(1);
+ expect(screen.getByLabelText('Quantity 2')).toHaveValue(2);
+ expect(screen.getByLabelText('Product 2')).toHaveValue('pen');
+ fireEvent.click(screen.getByRole('button',{name:/बेलन क्ले · BELAN CLAY/}));
+ expect(screen.getByLabelText('Product 1')).toHaveValue('clay');
+ expect(screen.getByLabelText('Quantity 1')).toHaveValue(1);
+ expect(screen.getByLabelText('Product 2')).toHaveValue('pen');
+ expect(screen.getByLabelText('Quantity 2')).toHaveValue(2);
+ expect(screen.getByRole('button',{name:'Confirm & save'})).toBeEnabled();
+ expect((supabase.rpc as jest.Mock).mock.calls.some(([name])=>name==='staff_save_sale')).toBe(false);
+});
