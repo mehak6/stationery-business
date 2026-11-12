@@ -25,8 +25,10 @@ const translations = new Map(Object.entries(vocabulary).flatMap(([word, aliases]
 export const productWords = (text: string) => normalize(text).split(' ').map(word => numbers[word] !== undefined ? String(numbers[word]) : translations.get(word) || word).join(' ');
 const numbers: Record<string, number> = { 'एक':1,'दो':2,'तीन':3,'चार':4,'पांच':5,'पाँच':5,'छह':6,'सात':7,'आठ':8,'नौ':9,'दस':10,'ग्यारह':11,'बारह':12,'तेरह':13,'चौदह':14,'पंद्रह':15,'बीस':20, one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,twelve:12,ek:1,do:2,teen:3,char:4,paanch:5 };
 const filler = new Set(['पीस','piece','pieces','बेचे','बेची','बेचा','बिके','बिकी','बिका','sold','दे']);
+['pcs','pc','नग'].forEach(w=>filler.add(w));
 const quantity = (word: string) => numbers[word] ?? (/^\d+$/.test(word) ? Number(word) : null);
 Object.assign(numbers, {'सोलह':16,'सत्रह':17,'अठारह':18,'उन्नीस':19,'इक्कीस':21,'बाईस':22,'तीस':30,'चालीस':40,'पचास':50,'साठ':60,'सत्तर':70,'अस्सी':80,'नब्बे':90,'सौ':100,'दो सौ':200});
+Object.assign(numbers, {'तेईस':23,'चौबीस':24,'पच्चीस':25,'छब्बीस':26,'सत्ताईस':27,'अट्ठाईस':28,'उनतीस':29,'इकतीस':31,'बत्तीस':32,'तैंतीस':33,'चौंतीस':34,'पैंतीस':35,'छत्तीस':36,'सैंतीस':37,'अड़तीस':38,'उनतालीस':39,'इकतालीस':41,'बयालीस':42,'तैंतालीस':43,'चवालीस':44,'पैंतालीस':45,'छियालीस':46,'सैंतालीस':47,'अड़तालीस':48,'उनचास':49,'इक्यावन':51,'बावन':52,'तिरपन':53,'चौवन':54,'पचपन':55,'छप्पन':56,'सत्तावन':57,'अट्ठावन':58,'उनसठ':59,'इकसठ':61,'बासठ':62,'तिरसठ':63,'चौंसठ':64,'पैंसठ':65,'छियासठ':66,'सड़सठ':67,'अड़सठ':68,'उनहत्तर':69,'इकहत्तर':71,'बहत्तर':72,'तिहत्तर':73,'चौहत्तर':74,'पचहत्तर':75,'छिहत्तर':76,'सतहत्तर':77,'अठहत्तर':78,'उनासी':79,'इक्यासी':81,'बयासी':82,'तिरासी':83,'चौरासी':84,'पचासी':85,'छियासी':86,'सतासी':87,'अट्ठासी':88,'नवासी':89,'इक्यानवे':91,'बानवे':92,'तिरानवे':93,'चौरानवे':94,'पचानवे':95,'छियानवे':96,'सत्तानवे':97,'अट्ठानवे':98,'निन्यानवे':99,eleven:11,thirteen:13,fourteen:14,fifteen:15,sixteen:16,seventeen:17,eighteen:18,nineteen:19,twenty:20});
 const namesFor = (p: SalesProduct) => [...new Set([p.name, ...(p.voice_aliases || []), ...suggestedHindiAliases(p.name)].map(productWords).filter(Boolean))];
 
 export function productSuggestions(text: string, products: SalesProduct[]): SalesProduct[] {
@@ -55,7 +57,7 @@ export function parseVoiceSale(text: string, products: SalesProduct[]): SalesLin
   const quantities = rest.split(' ').map(quantity).filter((v): v is number => v!==null);
   const ambiguous = quantities.length!==1 || /रुप|₹|rate|discount|डिस्काउंट|परसेंट|percent|box|बॉक्स|dozen|दर्जन|packet|पैकेट/.test(rest);
   return {product_id:exact?.p.id||'', quantity:ambiguous?0:quantities[0], unit_price:exact?.p.selling_price||0, heard,
-   suggested_ids: exact ? [] : productSuggestions(heard, products).map(p=>p.id)};
+   suggested_ids: exact ? [] : top.length ? [...new Set(top.map(c=>c.p.id))] : productSuggestions(heard, products).map(p=>p.id)};
  }
  // First recognise complete catalogue names, including names containing 'and/और'.
  // Prefer exact segmentation. If a name is unclear, quantity boundaries can still

@@ -25,3 +25,28 @@ it('choosing the unclear first product preserves its count and the second row',a
  expect(screen.getByRole('button',{name:'Confirm & save'})).toBeEnabled();
  expect((supabase.rpc as jest.Mock).mock.calls.some(([name])=>name==='staff_save_sale')).toBe(false);
 });
+
+it('requires rebuilding after the spoken text changes and preserves manual quantity edits',async()=>{
+ (supabase.rpc as jest.Mock).mockClear();
+ (supabase.rpc as jest.Mock).mockImplementation(async(name:string)=>({data:name==='staff_catalogue'?[{id:'pen',name:'PENS',voice_aliases:[],selling_price:20}]:{receipts:[],total:0,date:'2026-11-12'},error:null}));
+ const confirm=jest.spyOn(window,'confirm').mockReturnValue(true);
+ render(<VoiceSales/>);
+ await waitFor(()=>expect(screen.getByRole('button',{name:'Add item'})).toBeEnabled());
+ const text=screen.getByLabelText('Spoken or typed order');
+ fireEvent.change(text,{target:{value:'दो पेन'}});
+ fireEvent.click(screen.getByRole('button',{name:'Prepare draft'}));
+ fireEvent.change(screen.getByLabelText('Quantity 1'),{target:{value:'4'}});
+ expect(screen.getByRole('button',{name:'Confirm & save'})).toBeEnabled();
+ fireEvent.change(text,{target:{value:'तीन पेन'}});
+ expect(screen.getByRole('alert')).toHaveTextContent('Order changed');
+ expect(screen.getByRole('button',{name:'Confirm & save'})).toBeDisabled();
+ expect(screen.getByLabelText('Quantity 1')).toHaveValue(4);
+ fireEvent.click(screen.getByRole('button',{name:'Prepare draft'}));
+ expect(screen.getByLabelText('Quantity 1')).toHaveValue(3);
+ expect(screen.getByRole('button',{name:'Confirm & save'})).toBeEnabled();
+ fireEvent.change(screen.getByLabelText('Quantity 1'),{target:{value:''}});
+ expect(screen.getByText('Quantity unclear — enter the number of pieces.')).toBeInTheDocument();
+ expect(screen.getByRole('button',{name:'Confirm & save'})).toBeDisabled();
+ expect((supabase.rpc as jest.Mock).mock.calls.some(([name])=>name==='staff_save_sale')).toBe(false);
+ confirm.mockRestore();
+});

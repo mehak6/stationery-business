@@ -37,3 +37,10 @@ describe('bilingual catalogue matching',()=>{
  it('asks for selection when the catalogue has only variants',()=>{const p=[{...catalogue[0],id:'a',name:'PENCIL HB'},{...catalogue[0],id:'b',name:'PENCIL 2B'}];expect(parseVoiceSale('दो पेंसिल',p)[0]).toMatchObject({product_id:'',quantity:2,suggested_ids:expect.arrayContaining(['a','b'])})});
  it('does not auto-select duplicate exact names',()=>expect(parseVoiceSale('दो पेंसिल',[catalogue[0],{...catalogue[0],id:'other'}])[0].product_id).toBe(''));
 });
+
+describe('quantity and variant improvements',()=>{
+ const p=[{id:'pen',name:'PENS',voice_aliases:[],selling_price:20}];
+ it.each([['पच्चीस',25],['पैंतीस',35],['पचहत्तर',75],['निन्यानवे',99],['eleven',11]])('recognises %s pieces',(word,count)=>expect(parseVoiceSale(`${word} पेन`,p)[0]).toMatchObject({product_id:'pen',quantity:count}));
+ it('handles नग and pcs in one order',()=>expect(parseVoiceSale('पेन दो नग और पेन three pcs',p)).toMatchObject([{product_id:'pen',quantity:2},{product_id:'pen',quantity:3}]));
+ it('only suggests matching duplicates for a known numeric variant',()=>{const diaries=[30,60,60,80].map((price,i)=>({id:String(i),name:`DIARY @${price}`,voice_aliases:[],selling_price:price}));expect(parseVoiceSale('दो डायरी 60',diaries)[0]).toMatchObject({product_id:'',quantity:2,suggested_ids:['1','2']})});
+});
