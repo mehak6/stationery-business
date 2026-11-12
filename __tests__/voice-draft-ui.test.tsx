@@ -50,3 +50,15 @@ it('requires rebuilding after the spoken text changes and preserves manual quant
  expect((supabase.rpc as jest.Mock).mock.calls.some(([name])=>name==='staff_save_sale')).toBe(false);
  confirm.mockRestore();
 });
+
+it('shows browsable product buttons when speech has no matching name',async()=>{
+ (supabase.rpc as jest.Mock).mockImplementation(async(name:string)=>({data:name==='staff_catalogue'?[{id:'clay',name:'BELAN CLAY',voice_aliases:[],selling_price:100},{id:'pen',name:'PENS',voice_aliases:[],selling_price:20}]:{receipts:[],total:0,date:'2026-11-12'},error:null}));
+ render(<VoiceSales/>);
+ await waitFor(()=>expect(screen.getByRole('button',{name:'Add item'})).toBeEnabled());
+ fireEvent.change(screen.getByLabelText('Spoken or typed order'),{target:{value:'अज्ञातवस्तु तीन'}});
+ fireEvent.click(screen.getByRole('button',{name:'Prepare draft'}));
+ expect(screen.getByText(/No close match. Browse products/)).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('button',{name:/बेलन क्ले · BELAN CLAY/}));
+ expect(screen.getByLabelText('Product 1')).toHaveValue('clay');
+ expect(screen.getByLabelText('Quantity 1')).toHaveValue(3);
+});

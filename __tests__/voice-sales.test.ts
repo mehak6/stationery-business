@@ -1,4 +1,4 @@
-import {parseVoiceSale,saleTotal} from '../lib/voice-sales';
+import {parseVoiceSale,saleTotal,productSuggestions} from '../lib/voice-sales';
 import {hindiName,suggestedHindiAliases} from '../lib/hindi-products';
 const products=[{id:'pen',name:'Blue pen',voice_aliases:['नीले पेन'],selling_price:10.25},{id:'book',name:'Classmate 200',voice_aliases:['कॉपी'],selling_price:50}];
 describe('voice draft review',()=>{
@@ -26,7 +26,7 @@ describe('uncertain products keep their own quantities',()=>{
  it('retains a duplicate numeric product count',()=>expect(parseVoiceSale('दो डायरी 60',p)).toMatchObject([{product_id:'',quantity:2}]));
  it('keeps the second item when the first name is duplicated',()=>expect(parseVoiceSale('दो डायरी 60 तीन पेन',p)).toMatchObject([{product_id:'',quantity:2},{product_id:'pen',quantity:3}]));
  it('does not turn a price into an item or drop it',()=>expect(parseVoiceSale('दो पेन दस रुपये',p)).toMatchObject([{product_id:'',quantity:0}]));
- it('does not drop a trailing unknown word',()=>expect(parseVoiceSale('बेलन एक पेन दो बाकी',p)).toHaveLength(1));
+ it('does not drop a trailing unknown word',()=>expect(parseVoiceSale('बेलन एक पेन दो बाकी',p)).toMatchObject([{quantity:1},{product_id:'pen',quantity:2},{product_id:'',quantity:0,heard:'बाकी'}]));
 });
 describe('bilingual catalogue matching',()=>{
  const catalogue=[{id:'pencil',name:'PENCIL',selling_price:20,voice_aliases:[]},{id:'pen',name:'PENS',selling_price:10,voice_aliases:[]},{id:'red',name:'RED PEN',selling_price:15,voice_aliases:[]}];
@@ -43,4 +43,12 @@ describe('quantity and variant improvements',()=>{
  it.each([['पच्चीस',25],['पैंतीस',35],['पचहत्तर',75],['निन्यानवे',99],['eleven',11]])('recognises %s pieces',(word,count)=>expect(parseVoiceSale(`${word} पेन`,p)[0]).toMatchObject({product_id:'pen',quantity:count}));
  it('handles नग and pcs in one order',()=>expect(parseVoiceSale('पेन दो नग और पेन three pcs',p)).toMatchObject([{product_id:'pen',quantity:2},{product_id:'pen',quantity:3}]));
  it('only suggests matching duplicates for a known numeric variant',()=>{const diaries=[30,60,60,80].map((price,i)=>({id:String(i),name:`DIARY @${price}`,voice_aliases:[],selling_price:price}));expect(parseVoiceSale('दो डायरी 60',diaries)[0]).toMatchObject({product_id:'',quantity:2,suggested_ids:['1','2']})});
+});
+
+describe('unclear spoken names and an unfinished last item',()=>{
+ it('offers car choices for the confirmed mishearing without inferring its count',()=>{const cars=[{id:'a',name:'CAR',voice_aliases:[],selling_price:20},{id:'b',name:'CAR ',voice_aliases:[],selling_price:30}];expect(parseVoiceSale('डोकर तीन',cars)[0]).toMatchObject({product_id:'',quantity:3,suggested_ids:expect.arrayContaining(['a','b'])})});
+ const catalogue=[{id:'costume',name:'COSTUME',voice_aliases:[],selling_price:400},{id:'marker',name:'DUAL MARKER',voice_aliases:[],selling_price:20},{id:'goggles',name:'GOGGLES',voice_aliases:[],selling_price:50},{id:'highlighter',name:'HIGHLIGHTER',voice_aliases:[],selling_price:30}];
+ it('keeps every item in the reported phone transcript',()=>{const lines=parseVoiceSale('डोकर तीन कॉस्ट्यूम 4 मार्क्स 5 गॉगल्स तीन हाइलाइटर्स',catalogue);expect(lines).toMatchObject([{product_id:'',quantity:3},{product_id:'costume',quantity:4},{product_id:'',quantity:5,suggested_ids:expect.arrayContaining(['marker'])},{product_id:'goggles',quantity:3},{product_id:'highlighter',quantity:0}]);});
+ it('suggests a close spelling without automatically selecting it',()=>{expect(productSuggestions('हाइलायटर',catalogue).map(p=>p.id)).toContain('highlighter');expect(parseVoiceSale('दो हाइलायटर',catalogue)[0].product_id).toBe('')});
+ it('does not turn an unspoken trailing price into a count',()=>expect(parseVoiceSale('पेन दो रुपये',[{id:'pen',name:'PENS',voice_aliases:[],selling_price:20}])[0].quantity).toBe(0));
 });
