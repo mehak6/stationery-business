@@ -23,9 +23,21 @@ const vocabulary: Record<string, string[]> = {
  goggles: ['गॉगल्स','गोगल्स','गॉगल'], highlighter: ['हाइलाइटर','हाइलाइटर्स','हाईलाइटर','highlighters'],
 };
 const translations = new Map(Object.entries(vocabulary).flatMap(([word, aliases]) => aliases.map(alias => [normalize(alias), word] as const)));
-export const productWords = (text: string) => normalize(text).split(' ').map(word => numbers[word] !== undefined ? String(numbers[word]) : translations.get(word) || word).join(' ');
+export const productWords = (text: string) => {
+ const words=normalize(text).split(' '),out:string[]=[];
+ for(let i=0;i<words.length;i++){
+  let n=numbers[words[i]];
+  if(n!==undefined&&n>=1&&n<=9&&['सौ','hundred'].includes(words[i+1])){
+   n*=100;i++;
+   const tail=numbers[words[i+1]];if(tail>0&&tail<100){n+=tail;i++;}
+  }else if(['twenty','thirty','forty','fifty','sixty','seventy','eighty','ninety'].includes(words[i])&&numbers[words[i+1]]>0&&numbers[words[i+1]]<10){n+=numbers[words[++i]];}
+  out.push(n!==undefined?String(n):translations.get(words[i])||words[i]);
+ }
+ return out.join(' ');
+};
 const numbers: Record<string, number> = { 'एक':1,'दो':2,'तीन':3,'चार':4,'पांच':5,'पाँच':5,'छह':6,'सात':7,'आठ':8,'नौ':9,'दस':10,'ग्यारह':11,'बारह':12,'तेरह':13,'चौदह':14,'पंद्रह':15,'बीस':20, one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,twelve:12,ek:1,do:2,teen:3,char:4,paanch:5 };
 const filler = new Set(['पीस','piece','pieces','बेचे','बेची','बेचा','बिके','बिकी','बिका','sold','दे']);
+Object.assign(numbers,{thirty:30,forty:40,fifty:50,sixty:60,seventy:70,eighty:80,ninety:90});
 ['pcs','pc','नग'].forEach(w=>filler.add(w));
 const quantity = (word: string) => numbers[word] ?? (/^\d+$/.test(word) ? Number(word) : null);
 Object.assign(numbers, {'सोलह':16,'सत्रह':17,'अठारह':18,'उन्नीस':19,'इक्कीस':21,'बाईस':22,'तीस':30,'चालीस':40,'पचास':50,'साठ':60,'सत्तर':70,'अस्सी':80,'नब्बे':90,'सौ':100,'दो सौ':200});
