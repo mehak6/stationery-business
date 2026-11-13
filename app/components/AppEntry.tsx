@@ -3,6 +3,9 @@
 import React, { Suspense, Component, ReactNode } from 'react';
 import dynamic from 'next/dynamic';
 import VoiceSales from './VoiceSales';
+import { Capacitor } from '@capacitor/core';
+import AdminUnlock from './AdminUnlock';
+const OnlineAdmin = dynamic(() => import('./OnlineAdmin'), { ssr: false });
 import StaffAccess from './StaffAccess';
 const InventoryApp = dynamic(() => import('./InventoryApp'), { ssr: false });
 import AuthScreen from './AuthScreen';
@@ -68,8 +71,8 @@ function InventoryLoadingFallback() {
       <div className="text-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600 mx-auto mb-4"></div>
         <div className="flex flex-col items-center space-y-2">
-          <h2 className="text-xl font-semibold text-gray-900">Loading Inventory...</h2>
-          <p className="text-gray-600 text-sm">Please wait while we prepare your dashboard</p>
+          <h2 className="text-xl font-semibold text-gray-900">Loading Bol Bahi…</h2>
+          <p className="text-gray-600 text-sm">Preparing your sales register</p>
         </div>
       </div>
     </div>
@@ -116,9 +119,12 @@ function InventoryErrorFallback({ error, resetError }: { error: Error; resetErro
 /**
  * Protected app wrapper that shows auth screen if not logged in
  */
-export function ProtectedApp({ salesOnly = false }: { salesOnly?: boolean }) {
+export function ProtectedApp({ salesOnly = false, adminOnly = false }: { salesOnly?: boolean; adminOnly?: boolean }) {
   const { user, loading, role, accessLoading, accessError, refreshAccess, signOut } = useAuth();
   const [manageStaff, setManageStaff] = React.useState(false);
+  const [adminUnlocked, setAdminUnlocked] = React.useState(false);
+  React.useEffect(()=>{const lock=()=>{if(document.visibilityState==='hidden')setAdminUnlocked(false)};document.addEventListener('visibilitychange',lock);return()=>document.removeEventListener('visibilitychange',lock)},[]);
+  React.useEffect(()=>{setAdminUnlocked(false)},[user?.id]);
 
   if (loading) {
     return <InventoryLoadingFallback />;
@@ -138,7 +144,9 @@ export function ProtectedApp({ salesOnly = false }: { salesOnly?: boolean }) {
       <button onClick={signOut}>Sign out</button>
     </div></div>
   );
-  if (role === 'salesperson' || salesOnly) return <VoiceSales key={user.id} />;
+  if (role === 'salesperson' || salesOnly || !adminOnly) return <VoiceSales key={user.id} />;
+  if (!adminUnlocked) return <AdminUnlock onUnlock={()=>setAdminUnlocked(true)}/>;
+  if (Capacitor.isNativePlatform()) return <div className="min-h-screen bg-[#f4f6f1]"><header className="bg-white border-b p-4 flex justify-between"><button onClick={()=>window.location.assign("/")}>Bol Bahi home</button><button onClick={()=>setAdminUnlocked(false)}>Lock admin</button><button onClick={signOut}>Sign out</button></header><OnlineAdmin/></div>;
 
   return (
     <ErrorBoundary
@@ -148,7 +156,7 @@ export function ProtectedApp({ salesOnly = false }: { salesOnly?: boolean }) {
     >
       <ToastProvider>
         <div className="flex flex-wrap items-center gap-4 bg-slate-900 text-white px-6 py-3 text-sm">
-          <a href="/sales">Open voice sales counter</a>
+          <a href={Capacitor.isNativePlatform() ? '/sales.html' : '/sales'}>Open voice sales counter</a>
           <button onClick={() => setManageStaff(!manageStaff)}>{manageStaff ? 'Back to inventory' : 'Manage salesperson access'}</button>
         </div>
         <Suspense fallback={<InventoryLoadingFallback />}>
@@ -171,10 +179,10 @@ export function ProtectedApp({ salesOnly = false }: { salesOnly?: boolean }) {
  * - Loading states for better UX
  * - Accessibility considerations
  */
-export function AppEntry({ salesOnly = false }: { salesOnly?: boolean }) {
+export function AppEntry({ salesOnly = false, adminOnly = false }: { salesOnly?: boolean; adminOnly?: boolean }) {
   return (
     <AuthProvider>
-      <ProtectedApp salesOnly={salesOnly} />
+      <ProtectedApp salesOnly={salesOnly} adminOnly={adminOnly} />
     </AuthProvider>
   );
 }

@@ -1,17 +1,152 @@
-export interface SalesProduct { id:string;name:string;selling_price:number;voice_aliases:string[] }
-export interface SalesLine { product_id:string;quantity:number;unit_price:number;heard?:string }
-export const indiaDay=()=>new Date().toLocaleDateString('en-CA',{timeZone:'Asia/Kolkata'});
-export const normalize=(value:string)=>value.toLowerCase().replace(/[०-९]/g,c=>String('०१२३४५६७८९'.indexOf(c))).replace(/[.,।]/g,' ').replace(/\s+/g,' ').trim();
-export function parseVoiceSale(text:string,products:SalesProduct[]):SalesLine[]{
- const numbers:Record<string,number>={'एक':1,'दो':2,'तीन':3,'चार':4,'पांच':5,'पाँच':5,'छह':6,'सात':7,'आठ':8,'नौ':9,'दस':10,'ग्यारह':11,'बारह':12,'one':1,'two':2,'three':3,'four':4,'five':5,'six':6,'ten':10,'twelve':12};
- return text.split(/[,\n।]+|\s+और\s+|\s+and\s+/i).filter(c=>c.trim()).map(heard=>{
-  const clause=normalize(heard);
-  const matches=products.filter(p=>[p.name,...(p.voice_aliases||[])].filter(a=>a.trim()).some(a=>(' '+clause+' ').includes(' '+normalize(a)+' ')));
-  const p=matches.length===1?matches[0]:undefined;let rest=clause;
-  if(p)for(const name of [p.name,...(p.voice_aliases||[])].sort((a,b)=>b.length-a.length)){const alias=normalize(name);if(alias)rest=(' '+rest+' ').replace(' '+alias+' ',' ').trim()}
-  const quantities=rest.split(' ').map(w=>numbers[w]??(/^\d+$/.test(w)?Number(w):null)).filter(v=>v!==null);
-  const ambiguous=quantities.length!==1||/रुप|₹|rate|discount|डिस्काउंट|परसेंट|percent|box|बॉक्स|dozen|दर्जन|packet|पैकेट/.test(rest);
-  return {product_id:p?.id||'',quantity:ambiguous?0:quantities[0]!,unit_price:p?.selling_price||0,heard};
- });
+import {suggestedHindiAliases} from './hindi-products';
+export interface SalesProduct { id: string; name: string; selling_price: number; voice_aliases: string[] }
+export interface SalesLine { product_id: string; quantity: number; unit_price: number; heard?: string; suggested_ids?: string[] }
+export const indiaDay = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+export const normalize = (value: string) => value.normalize('NFC').toLowerCase().replace(/[०-९]/g, c => String('०१२३४५६७८९'.indexOf(c))).replace(/[.,।@()\-_/]/g, ' ').replace(/\s+/g, ' ').trim();
+
+// Translate product words, never prices or quantities. Variants require review.
+const vocabulary: Record<string, string[]> = {
+ pencil: ['पेंसिल','पेन्सिल','पेंसिलें','pensil','pencils'],
+ pen: ['पेन','पैन','pens'], notebook: ['कॉपी','कापी','नोटबुक','copy','copies','notebooks'],
+ eraser: ['रबड़','रबर','इरेज़र','इरेजर','rubber','erasers'],
+ sharpener: ['शार्पनर','sharpners','sharpeners'],
+ ruler: ['स्केल','रूलर','scale','scales'], diary: ['डायरी','diaries'],
+ blue: ['नीला','नीले','नीली','neela','neele'], red: ['लाल','laal'], black: ['काला','काले','काली'],
+ green: ['हरा','हरे','हरी'], book: ['बुक','किताब','books'],
+ ball: ['बॉल','गेंद','balls'], car: ['कार','cars'], doll: ['डॉल','गुड़िया','dolls'],
+ keychain: ['कीचेन','कीरिंग','keychains'], glue: ['ग्लू','गोंद'],
+ marker: ['मार्कर','markers'], file: ['फाइल','फ़ाइल','files'],
+ folder: ['फोल्डर','folders'], tape: ['टेप','tapes'], clay: ['क्ले'],
+ crayon: ['क्रेयॉन','क्रेयोन','crayons'], colour: ['कलर','कलर्स','color','colors','colours'],
+ cover: ['कवर','covers'], mobile: ['मोबाइल'], watch: ['वॉच','घड़ी','watches'],
+ bottle: ['बोतल','बॉटल','bottles'], bag: ['बैग','bags'],
+ goggles: ['गॉगल्स','गोगल्स','गॉगल'], highlighter: ['हाइलाइटर','हाइलाइटर्स','हाईलाइटर','highlighters'],
+};
+const translations = new Map(Object.entries(vocabulary).flatMap(([word, aliases]) => aliases.map(alias => [normalize(alias), word] as const)));
+export const productWords = (text: string) => {
+ const words=normalize(text).split(' '),out:string[]=[];
+ for(let i=0;i<words.length;i++){
+  let n=numbers[words[i]];
+  if(n!==undefined&&n>=1&&n<=9&&['सौ','hundred'].includes(words[i+1])){
+   n*=100;i++;
+   const tail=numbers[words[i+1]];if(tail>0&&tail<100){n+=tail;i++;}
+  }else if(['twenty','thirty','forty','fifty','sixty','seventy','eighty','ninety'].includes(words[i])&&numbers[words[i+1]]>0&&numbers[words[i+1]]<10){n+=numbers[words[++i]];}
+  out.push(n!==undefined?String(n):translations.get(words[i])||words[i]);
+ }
+ return out.join(' ');
+};
+const numbers: Record<string, number> = { 'एक':1,'दो':2,'तीन':3,'चार':4,'पांच':5,'पाँच':5,'छह':6,'सात':7,'आठ':8,'नौ':9,'दस':10,'ग्यारह':11,'बारह':12,'तेरह':13,'चौदह':14,'पंद्रह':15,'बीस':20, one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,twelve:12,ek:1,do:2,teen:3,char:4,paanch:5 };
+const filler = new Set(['पीस','piece','pieces','बेचे','बेची','बेचा','बिके','बिकी','बिका','sold','दे']);
+Object.assign(numbers,{thirty:30,forty:40,fifty:50,sixty:60,seventy:70,eighty:80,ninety:90});
+['pcs','pc','नग'].forEach(w=>filler.add(w));
+const quantity = (word: string) => numbers[word] ?? (/^\d+$/.test(word) ? Number(word) : null);
+Object.assign(numbers, {'सोलह':16,'सत्रह':17,'अठारह':18,'उन्नीस':19,'इक्कीस':21,'बाईस':22,'तीस':30,'चालीस':40,'पचास':50,'साठ':60,'सत्तर':70,'अस्सी':80,'नब्बे':90,'सौ':100,'दो सौ':200});
+Object.assign(numbers, {'तेईस':23,'चौबीस':24,'पच्चीस':25,'छब्बीस':26,'सत्ताईस':27,'अट्ठाईस':28,'उनतीस':29,'इकतीस':31,'बत्तीस':32,'तैंतीस':33,'चौंतीस':34,'पैंतीस':35,'छत्तीस':36,'सैंतीस':37,'अड़तीस':38,'उनतालीस':39,'इकतालीस':41,'बयालीस':42,'तैंतालीस':43,'चवालीस':44,'पैंतालीस':45,'छियालीस':46,'सैंतालीस':47,'अड़तालीस':48,'उनचास':49,'इक्यावन':51,'बावन':52,'तिरपन':53,'चौवन':54,'पचपन':55,'छप्पन':56,'सत्तावन':57,'अट्ठावन':58,'उनसठ':59,'इकसठ':61,'बासठ':62,'तिरसठ':63,'चौंसठ':64,'पैंसठ':65,'छियासठ':66,'सड़सठ':67,'अड़सठ':68,'उनहत्तर':69,'इकहत्तर':71,'बहत्तर':72,'तिहत्तर':73,'चौहत्तर':74,'पचहत्तर':75,'छिहत्तर':76,'सतहत्तर':77,'अठहत्तर':78,'उनासी':79,'इक्यासी':81,'बयासी':82,'तिरासी':83,'चौरासी':84,'पचासी':85,'छियासी':86,'सतासी':87,'अट्ठासी':88,'नवासी':89,'इक्यानवे':91,'बानवे':92,'तिरानवे':93,'चौरानवे':94,'पचानवे':95,'छियानवे':96,'सत्तानवे':97,'अट्ठानवे':98,'निन्यानवे':99,eleven:11,thirteen:13,fourteen:14,fifteen:15,sixteen:16,seventeen:17,eighteen:18,nineteen:19,twenty:20});
+const namesFor = (p: SalesProduct) => [...new Set([p.name, ...(p.voice_aliases || []), ...suggestedHindiAliases(p.name)].map(productWords).filter(Boolean))];
+
+export function productSuggestions(text: string, products: SalesProduct[]): SalesProduct[] {
+ const ignore=new Set(['के','की','का','लिए','वाला','वाली','वाले','और','and']);
+ const query = [...new Set((productWords(text)+' '+normalize(text)).split(' '))].filter(w => quantity(w) === null && !filler.has(w)&&!ignore.has(w));
+ // Confirmed device mishearing of 'दो कार'. Suggestions only: never infer its
+ // embedded count or silently pick between duplicate car inventory entries.
+ if(query.some(w=>['डोकर','डोकार','दोकार'].includes(w)))query.push('car');
+ if (!query.length) return [];
+ function similarity(a:string,b:string){
+  if(a===b)return 5;
+  if(Math.min(a.length,b.length)<4||Math.max(a.length,b.length)>32)return 0;
+  const limit=Math.min(a.length,b.length)>=7||(/[\u0900-\u097f]/.test(a+b)&&Math.min(a.length,b.length)>=5)?2:1;
+  if(Math.abs(a.length-b.length)>limit)return 0;
+  let row=Array.from({length:b.length+1},(_,i)=>i);
+  for(let i=1;i<=a.length;i++){const next=[i];for(let j=1;j<=b.length;j++)next[j]=Math.min(next[j-1]+1,row[j]+1,row[j-1]+(a[i-1]===b[j-1]?0:1));row=next;}
+  return row[b.length]<=limit?1:0;
+ }
+ return products.map(p => {
+  const names=[...namesFor(p),...[p.name,...(p.voice_aliases||[]),...suggestedHindiAliases(p.name)].map(normalize)];
+  return {p,score:Math.max(...names.map(name=>name.split(' ').filter(w=>quantity(w)===null&&!ignore.has(w)).reduce((score,w)=>score+Math.max(0,...query.map(q=>similarity(q,w))),0)))};
+ })
+  .filter(item => item.score > 0).sort((a,b) => b.score-a.score || a.p.name.localeCompare(b.p.name)).slice(0,8).map(item => item.p);
 }
-export function saleTotal(lines:SalesLine[]){return lines.reduce((total,l)=>total+Math.round(l.unit_price*100)*l.quantity,0)/100}
+export function parseVoiceSale(text: string, products: SalesProduct[]): SalesLine[] {
+ const namedProducts=products.map(p=>({p,names:namesFor(p)}));
+ function parseLine(heard:string):SalesLine {
+  const clause = productWords(heard);
+  const candidates = namedProducts.flatMap(({p,names}) => names.flatMap(name => {
+   if (!(' '+clause+' ').includes(' '+name+' ')) return [];
+   const rest = (' '+clause+' ').replace(' '+name+' ', ' ').trim();
+   // Never silently discard an unmatched brand, colour, pack or price.
+   if (rest.split(' ').some(w => w && quantity(w) === null && !filler.has(w))) return [];
+   return [{p, name, rest}];
+  })).sort((a,b) => b.name.length-a.name.length);
+  const best = candidates[0];
+  const exact = best && new Set(candidates.filter(c => c.name.length===best.name.length).map(c=>c.p.id)).size===1 ? best : undefined;
+  // A duplicate catalogue name still identifies which number is the quantity.
+  // Leave the product unselected, but do not mistake its price/size for a quantity.
+  const top=candidates.filter(c=>c.name.length===best?.name.length);
+  const rest = exact?.rest || (top.length && new Set(top.map(c=>c.rest)).size===1 ? top[0].rest : clause);
+  const quantities = rest.split(' ').map(quantity).filter((v): v is number => v!==null);
+  const ambiguous = quantities.length!==1 || /रुप|₹|rate|discount|डिस्काउंट|परसेंट|percent|box|बॉक्स|dozen|दर्जन|packet|पैकेट/.test(rest);
+  return {product_id:exact?.p.id||'', quantity:ambiguous?0:quantities[0], unit_price:exact?.p.selling_price||0, heard,
+   suggested_ids: exact ? [] : [...new Set(top.map(c=>c.p.id))]};
+ }
+ // First recognise complete catalogue names, including names containing 'and/और'.
+ // Prefer exact segmentation. If a name is unclear, quantity boundaries can still
+ // preserve separate rows; matching a product and detecting its count are separate.
+ function segment(heard:string):SalesLine[]{
+  const whole=parseLine(heard);
+  if(whole.product_id && whole.quantity>0)return [whole];
+  const words=heard.trim().split(/\s+/);
+  if(words.length>100)return [whole];
+  const memo=new Map<number,SalesLine[][]>();
+  function paths(start:number):SalesLine[][] {
+   if(start===words.length)return [[]];
+   if(memo.has(start))return memo.get(start)!;
+   const found:SalesLine[][]=[];
+   for(let end=start+1;end<=words.length;end++){
+    const line=parseLine(words.slice(start,end).join(' '));
+    if(!line.product_id || line.quantity<=0)continue;
+    for(const suffix of paths(end)){found.push([line,...suffix]);if(found.length>1)break;}
+    if(found.length>1)break;
+   }
+   memo.set(start,found);return found;
+  }
+  const possible=paths(0);if(possible.length===1)return possible[0];
+  if(possible.length>1 || words.some(w=>/^(और|and|फिर|plus|प्लस)$/i.test(w)))return [whole];
+  const canonical=words.map(w=>productWords(w));
+  // A numeric size or price inside a known name must never become a new item.
+  const nameNumbers=new Set<number>();
+  for(let start=0;start<words.length;start++)for(let end=start+1;end<=words.length;end++){
+   const phrase=canonical.slice(start,end).join(' ');
+   if(namedProducts.some(p=>p.names.includes(phrase)))for(let i=start;i<end;i++)if(quantity(canonical[i])!==null)nameNumbers.add(i);
+  }
+  const counts=canonical.flatMap((w,i)=>quantity(w)!==null&&!nameNumbers.has(i)?[i]:[]);
+  if(counts.length<2)return [whole];
+  const prefix=counts[0]===0;
+  const boundaries:number[]=[0];
+  if(prefix)boundaries.push(...counts.slice(1));
+  else for(const i of counts){let end=i+1;while(end<words.length&&filler.has(canonical[end]))end++;boundaries.push(end);}
+  if(boundaries[boundaries.length-1]!==words.length)boundaries.push(words.length);
+  const separated=boundaries.slice(0,-1).map((start,i)=>parseLine(words.slice(start,boundaries[i+1]).join(' ')));
+  // Keep unknown product words for manual selection. Never discard prices, packs,
+  // leftover words or a fragment that consists only of a number/unit.
+  return separated.length>1 && separated.every((l,i)=>{
+   const words=productWords(l.heard||'').split(' ');
+   const hasName=words.some(w=>quantity(w)===null&&!filler.has(w));
+   const missingLastCount=i===separated.length-1 && !words.some(w=>quantity(w)!==null) && !/रुप|₹|rate|discount|डिस्काउंट|percent|box|बॉक्स|dozen|दर्जन|packet|पैकेट/.test(l.heard||'');
+   return hasName&&(l.quantity>0||missingLastCount);
+  }) ? separated : [whole];
+ }
+ const result=text.split(/[,\n।;]+/).filter(c=>c.trim()).flatMap(chunk=>{
+  const whole=segment(chunk);if(whole.every(l=>l.product_id&&l.quantity>0))return whole;
+  // Protect conjunctions inside known catalogue names, such as a pen-and-diary set.
+  const tokens=chunk.trim().split(/\s+/);const protectedCuts=new Set<number>();
+  for(let start=0;start<tokens.length;start++)for(let end=start+1;end<=tokens.length;end++){
+   const phrase=productWords(tokens.slice(start,end).join(' '));
+   if(namedProducts.some(p=>p.names.includes(phrase)))for(let i=start;i<end;i++)protectedCuts.add(i);
+  }
+  const parts:string[]=[];let start=0;
+  tokens.forEach((token,i)=>{if(/^(और|and|फिर|plus|प्लस)$/i.test(token)&&!protectedCuts.has(i)){parts.push(tokens.slice(start,i).join(' '));start=i+1;}});
+  parts.push(tokens.slice(start).join(' '));return parts.filter(p=>p.trim()).flatMap(segment);
+ });
+ return result.map(line=>line.product_id||line.suggested_ids?.length?line:{...line,suggested_ids:productSuggestions(line.heard||'',products).map(p=>p.id)});
+}
+export function saleTotal(lines: SalesLine[]) { return lines.reduce((total,l)=>total+Math.round(l.unit_price*100)*l.quantity,0)/100; }

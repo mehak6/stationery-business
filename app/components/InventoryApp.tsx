@@ -40,7 +40,6 @@ function InventoryApp() {
   const { signOut, user } = useAuth();
   const [currentView, setCurrentView] = useState('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [viewHistory, setViewHistory] = useState(['dashboard']);
   const [showBackupModal, setShowBackupModal] = useState(false);
 
   const handleSignOut = async () => {
@@ -78,43 +77,37 @@ function InventoryApp() {
 
   const handleNavigate = (view: string) => {
     if (view !== currentView) {
-      setViewHistory(prev => [...prev, view]);
+      window.history.pushState({ view }, '', `#${view}`);
       setCurrentView(view);
       setMobileMenuOpen(false);
+      window.scrollTo({ top: 0, behavior: 'instant' });
     }
   };
 
   const handleBack = () => {
-    if (viewHistory.length > 1) {
-      const newHistory = [...viewHistory];
-      newHistory.pop();
-      const previousView = newHistory[newHistory.length - 1];
-      setViewHistory(newHistory);
-      setCurrentView(previousView);
-    } else {
-      setCurrentView('dashboard');
-      setViewHistory(['dashboard']);
-    }
+    window.history.back();
   };
 
   // Handle browser back button
   useEffect(() => {
-    const handlePopState = (event: PopStateEvent) => {
-      event.preventDefault();
-      handleBack();
+    const readView = () => {
+      const view = window.location.hash.slice(1);
+      setCurrentView(['dashboard','products','quick-sale','party','ledger','reports'].includes(view) ? view : 'dashboard');
+      setMobileMenuOpen(false);
     };
 
     if (typeof window !== 'undefined') {
-      window.history.pushState({ view: currentView }, '', `#${currentView}`);
-      window.addEventListener('popstate', handlePopState);
+      if (!window.location.hash) window.history.replaceState({ view: 'dashboard' }, '', '#dashboard');
+      readView();
+      window.addEventListener('popstate', readView);
     }
 
     return () => {
       if (typeof window !== 'undefined') {
-        window.removeEventListener('popstate', handlePopState);
+        window.removeEventListener('popstate', readView);
       }
     };
-  }, [currentView]);
+  }, []);
 
   const getViewTitle = (view: string) => {
     switch (view) {

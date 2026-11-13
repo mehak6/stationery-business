@@ -1,12 +1,14 @@
 import React from 'react';
-import {render,screen} from '@testing-library/react';
+import {render,screen,fireEvent} from '@testing-library/react';
 import '@testing-library/jest-dom';
 import {ProtectedApp} from '../app/components/AppEntry';
 import {useAuth} from '../app/context/AuthContext';
+import {Capacitor} from '@capacitor/core';
 jest.mock('../app/context/AuthContext',()=>({useAuth:jest.fn(),AuthProvider:({children}:any)=>children}));
 jest.mock('../app/components/VoiceSales',()=>()=> <div>Restricted sales counter</div>);
 jest.mock('../app/components/StaffAccess',()=>()=> <div>Staff administration</div>);
 jest.mock('../app/components/AuthScreen',()=>()=> <div>Sign in</div>);
+jest.mock('../app/components/AdminUnlock',()=>({onUnlock}:any)=><button onClick={onUnlock}>Verify admin password</button>);
 jest.mock('../app/context/ToastContext',()=>({ToastProvider:({children}:any)=>children}));
 jest.mock('../app/components/Toast',()=>({ToastContainer:()=>null}));
 jest.mock('next/dynamic',()=>()=>()=> <div>Private inventory dashboard</div>);
@@ -15,4 +17,6 @@ const base={user:{id:'staff'},loading:false,accessLoading:false,role:'salesperso
 it('salesperson receives only the counter even on the admin root URL',()=>{mock.mockReturnValue(base);render(<ProtectedApp/>);expect(screen.getByText('Restricted sales counter')).toBeInTheDocument();expect(screen.queryByText('Private inventory dashboard')).not.toBeInTheDocument();expect(screen.queryByText('Manage salesperson access')).not.toBeInTheDocument()});
 it('pending users never mount either business view',()=>{mock.mockReturnValue({...base,role:'pending'});render(<ProtectedApp/>);expect(screen.getByText('Waiting for admin approval')).toBeInTheDocument();expect(screen.queryByText('Restricted sales counter')).not.toBeInTheDocument();expect(screen.queryByText('Private inventory dashboard')).not.toBeInTheDocument()});
 it('database access errors fail closed',()=>{mock.mockReturnValue({...base,role:null,accessError:'Access unavailable'});render(<ProtectedApp/>);expect(screen.getByText('Access setup needed')).toBeInTheDocument();expect(screen.queryByText('Private inventory dashboard')).not.toBeInTheDocument()});
-it('only admins mount the inventory and staff management navigation',()=>{mock.mockReturnValue({...base,role:'admin'});render(<ProtectedApp/>);expect(screen.getByText('Private inventory dashboard')).toBeInTheDocument();expect(screen.getByText('Manage salesperson access')).toBeInTheDocument()});
+it('admin accounts also start at Bol Bahi, without mounting inventory',()=>{mock.mockReturnValue({...base,role:'admin'});render(<ProtectedApp/>);expect(screen.getByText('Restricted sales counter')).toBeInTheDocument();expect(screen.queryByText('Private inventory dashboard')).not.toBeInTheDocument()});
+it('staff cannot mount business details by opening the admin route',()=>{mock.mockReturnValue(base);render(<ProtectedApp adminOnly/>);expect(screen.getByText('Restricted sales counter')).toBeInTheDocument();expect(screen.queryByText('Verify admin password')).not.toBeInTheDocument()});
+it('requires an admin password before mounting the web inventory',()=>{mock.mockReturnValue({...base,role:'admin'});render(<ProtectedApp adminOnly/>);expect(screen.queryByText('Private inventory dashboard')).not.toBeInTheDocument();fireEvent.click(screen.getByText('Verify admin password'));expect(screen.getByText('Private inventory dashboard')).toBeInTheDocument();expect(screen.getByText('Manage salesperson access')).toBeInTheDocument()});

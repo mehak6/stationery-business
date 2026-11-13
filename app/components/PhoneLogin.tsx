@@ -1,8 +1,17 @@
 'use client';
-import { useState } from 'react';
-import { supabase } from '../../supabase_client';
+import {useState} from 'react';
+import {supabase} from '../../supabase_client';
+import {staffLoginEmail} from '../../lib/phone';
 export default function PhoneLogin(){
- const [phone,setPhone]=useState(''),[code,setCode]=useState(''),[sent,setSent]=useState(false),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
- return <form className="mt-6 border-t pt-6 space-y-3" onSubmit={async e=>{e.preventDefault();setBusy(true);setMessage('');try{if(!/^\+[1-9]\d{7,14}$/.test(phone))throw Error('Use your country code, for example +91 followed by your mobile number.');const {error}=sent?await supabase.auth.verifyOtp({phone,token:code,type:'sms'}):await supabase.auth.signInWithOtp({phone});if(error)throw error;setSent(true);setMessage(sent?'Signed in.':'Enter the code sent to your phone. Admin approval is still required.')}catch(e:any){setMessage(e.message)}finally{setBusy(false)}}}>
- <h2 className="font-semibold">Or sign in with your mobile</h2><label className="block text-sm">Mobile number<input className="block border rounded-lg p-3 w-full mt-1" type="tel" autoComplete="tel" required disabled={sent||busy} placeholder="+91…" value={phone} onChange={e=>setPhone(e.target.value)}/></label>{sent&&<label className="block text-sm">SMS code<input className="block border rounded-lg p-3 w-full mt-1" inputMode="numeric" autoComplete="one-time-code" required value={code} onChange={e=>setCode(e.target.value)}/></label>}<button disabled={busy} className="bg-primary-600 text-white px-4 py-2 rounded-lg">{busy?'Please wait…':sent?'Verify code':'Send code'}</button>{sent&&<button type="button" onClick={()=>{setSent(false);setCode('')}} className="ml-3 text-sm">Change number / resend</button>}{message&&<p role="status" className="text-sm">{message}</p>}</form>
+ const [phone,setPhone]=useState(''),[password,setPassword]=useState(''),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
+ return <form className="space-y-5" onSubmit={async e=>{e.preventDefault();setBusy(true);setMessage('');try{
+ const {error}=await supabase.auth.signInWithPassword({email:staffLoginEmail(phone),password});
+ if(error)throw Error('Mobile number or password is incorrect, or your account is not ready. Ask the admin for help.');
+ setPassword('');
+ }catch(e:any){setMessage(e.message)}finally{setBusy(false)}}}>
+ <label className="block text-sm font-medium">Mobile number<input aria-label="Staff mobile number" className="block border rounded-xl p-3 w-full mt-2" type="tel" autoComplete="tel" required disabled={busy} placeholder="10-digit mobile number" value={phone} onChange={e=>setPhone(e.target.value)}/></label>
+ <label className="block text-sm font-medium">Password<input aria-label="Staff password" className="block border rounded-xl p-3 w-full mt-2" type="password" autoComplete="current-password" required disabled={busy} value={password} onChange={e=>setPassword(e.target.value)}/></label>
+ <button disabled={busy} className="w-full bg-emerald-800 text-white px-4 py-3 rounded-xl">{busy?'Signing in…':'Open Bol Bahi'}</button>
+ {message&&<p role="alert" className="text-sm text-red-700">{message}</p>}
+ <p className="text-xs text-slate-500">Use the account created by your shop admin. No SMS or OTP needed.</p></form>;
 }
